@@ -11,7 +11,7 @@ jobs:
       AZURE_LOCATION: 'eastus'                         # Change this to your desired Azure region
       PIHOLE_VM_NAME: 'pihole-vm'                      # Change this to your desired Pi-hole VM name
       DYNATRACE_VM_NAME: 'dynatrace-vm'                # Change this to your desired Dynatrace VM name
-      VM_USERNAME: 'admin'                             # Change this to your desired VM username
+      VM_USERNAME: 'nicolasnk'                             # Change this to your desired VM username
 
     steps:
       # Step 1: Check out the latest main branch
