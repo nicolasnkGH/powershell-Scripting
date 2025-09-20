@@ -6,29 +6,28 @@ on:
       action:
         description: 'Choose an action to perform.'
         required: true
-        default: 'provision'
         type: choice
         options:
-        - provision
-        - destroy
-      resource-group-name:
-        description: 'The name of the Azure Resource Group to provision to or destroy.'
-        required: true
+          - provision
+          - destroy
 
-# Add permissions for the ID token to be generated. This is required for OIDC.
+env:
+  AZURE_RESOURCE_GROUP: 'pihole-dynatrace-rg'
+  AZURE_LOCATION: 'eastus'
+  VM_USERNAME: 'nicolasnk'
+  
 permissions:
   id-token: write
   contents: read
 
 jobs:
   provision-vms:
+    if: github.event.inputs.action == 'provision'
     runs-on: ubuntu-latest
     steps:
-      # Step 1: Check out the latest main branch
       - name: Checkout latest main
         uses: actions/checkout@v4
 
-      # Step 2: Azure Login using OpenID Connect (OIDC) for enhanced security
       - name: Azure Login
         uses: azure/login@v2
         with:
@@ -36,29 +35,32 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      # Step 3: Create SSH key file from secret
-      - name: Create SSH key file from secret
-        run: |
-          echo "${{ secrets.SSH_KEY_PUBLIC }}" > id_rsa.pub
-        shell: bash
-
-      # Step 4: Run PowerShell provisioning script
       - name: Run PowerShell provisioning script
-        if: ${{ github.event.inputs.action == 'provision' }}
+        shell: pwsh
         run: |
           ./Invoke-AzureProvisioning.ps1 `
-            -ResourceGroupName ${{ github.event.inputs.resource-group-name }} `
-            -VMLocation 'eastus' `
-            -AdminUsername 'azureuser' `
+            -ResourceGroupName $env:AZURE_RESOURCE_GROUP `
+            -VMLocation $env:AZURE_LOCATION `
+            -AdminUsername $env:VM_USERNAME `
             -AdminSshKeyFile "id_rsa.pub" `
             -VMNames 'pihole-vm','dynatrace-vm'
-        shell: pwsh
+  
+  destroy-vms:
+    if: github.event.inputs.action == 'destroy'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout latest main
+        uses: actions/checkout@v4
 
-      # Step 5: Run PowerShell destruction script
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          
       - name: Run PowerShell destruction script
-        if: ${{ github.event.inputs.action == 'destroy' }}
+        shell: pwsh
         run: |
           ./Destroy-AzureResources.ps1 `
-            -ResourceGroupName ${{ github.event.inputs.resource-group-name }} `
-            -Force
-        shell: pwsh
+            -ResourceGroupName "$ENV:AZURE_RESOURCE_GROUP"
