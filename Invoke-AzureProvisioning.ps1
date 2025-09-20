@@ -1,29 +1,37 @@
 <#
 .SYNOPSIS
-    A reusable PowerShell script to provision one or more virtual machines and their
-    network resources on Azure.
+    Provisions a set of Azure Virtual Machines and their associated networking resources.
 
 .DESCRIPTION
-    This script is designed to be executed as part of a CI/CD pipeline.
-    It contains a reusable function for provisioning a new virtual machine, along
-    with its associated public IP, network interface, and network security group.
-    The script then calls this function for each VM defined in the workflow.
+    This script automates the provisioning of Azure infrastructure, including a
+    resource group, virtual network, public IP, network security group, and virtual
+    machines. It is designed to be run from a pipeline or a CI/CD environment.
 
 .PARAMETER ResourceGroupName
-    The name of the Azure resource group to be used for the deployment.
+    The name of the Azure Resource Group to create.
 
 .PARAMETER VMLocation
-    The Azure region for the virtual machines (e.g., 'eastus').
-
-.PARAMETER VMNames
-    An array of desired names for the virtual machines.
+    The Azure region where the resources will be provisioned.
 
 .PARAMETER AdminUsername
-    The administrator username for the virtual machines.
+    The username for the virtual machines' administrator account.
 
 .PARAMETER AdminSshKeyFile
-    The file path to the public SSH key for the administrator user.
+    The path to the SSH public key file to be used for authentication.
+
+.PARAMETER VMNames
+    A comma-separated list of virtual machine names to provision.
+
+.EXAMPLE
+    ./Invoke-AzureProvisioning.ps1 `
+        -ResourceGroupName "my-test-rg" `
+        -VMLocation "eastus" `
+        -AdminUsername "myuser" `
+        -AdminSshKeyFile "C:\users\myuser\.ssh\id_rsa.pub" `
+        -VMNames "vm1","vm2"
+    This example provisions a new resource group and two VMs.
 #>
+
 [CmdletBinding()]
 param (
     [Parameter(Mandatory = $true)]
@@ -33,116 +41,99 @@ param (
     [string]$VMLocation,
 
     [Parameter(Mandatory = $true)]
-    [string[]]$VMNames,
-
-    [Parameter(Mandatory = $true)]
     [string]$AdminUsername,
 
     [Parameter(Mandatory = $true)]
-    [string]$AdminSshKeyFile
+    [string]$AdminSshKeyFile,
+
+    [Parameter(Mandatory = $true)]
+    [string[]]$VMNames
 )
 
-# A reusable function to provision a single virtual machine and its resources
-function Provision-VM {
-    param(
-        [string]$Name,
-        [string]$ResourceGroup,
-        [string]$Location,
-        [string]$Username,
-        [string]$SshKeyFile
-    )
+Write-Host "Starting the provisioning process..." -ForegroundColor Yellow
 
-    Write-Host "Starting the provisioning process for VM '$Name' in location '$Location'..." -ForegroundColor Yellow
-
-    # Create a virtual network and subnet.
-    $vnetName = "$Name-vnet"
-    $subnetName = "$Name-subnet"
-    Write-Host "Creating virtual network and subnet..." -ForegroundColor Cyan
-    az network vnet create `
-        --resource-group $ResourceGroup `
-        --name $vnetName `
-        --address-prefix 10.0.0.0/16 `
-        --subnet-name $subnetName `
-        --subnet-prefix 10.0.0.0/24 > $null
-    Write-Host "Virtual network created." -ForegroundColor Green
-
-    # Create a public IP address.
-    $publicIpName = "$Name-public-ip"
-    Write-Host "Creating public IP address..." -ForegroundColor Cyan
-    az network public-ip create `
-        --resource-group $ResourceGroup `
-        --name $publicIpName `
-        --location $Location `
-        --allocation-method Static > $null
-    Write-Host "Public IP created." -ForegroundColor Green
-
-    # Create a network security group (NSG).
-    $nsgName = "$Name-nsg"
-    Write-Host "Creating network security group..." -ForegroundColor Cyan
-    az network nsg create `
-        --resource-group $ResourceGroup `
-        --name $nsgName > $null
-    Write-Host "NSG created." -ForegroundColor Green
-
-    # Create a network interface card (NIC).
-    $nicName = "$Name-nic"
-    Write-Host "Creating network interface card..." -ForegroundColor Cyan
-    az network nic create `
-        --resource-group $ResourceGroup `
-        --name $nicName `
-        --vnet-name $vnetName `
-        --subnet $subnetName `
-        --network-security-group $nsgName `
-        --public-ip-address $publicIpName > $null
-    Write-Host "NIC created." -ForegroundColor Green
-
-    # Create the virtual machine.
-    Write-Host "Creating virtual machine '$Name'..." -ForegroundColor Cyan
-    az vm create `
-        --resource-group $ResourceGroup `
-        --name $Name `
-        --location $Location `
-        --image Ubuntu2204 `
-        --size Standard_B2s `
-        --public-ip-address "$Name-public-ip" `
-        --nics $nicName `
-        --admin-username $Username `
-        --ssh-key-values (Get-Content $SshKeyFile) > $null
-
-    Write-Host "Virtual machine '$Name' successfully created." -ForegroundColor Green
-}
-
-# Step 1: Login to Azure using a service principal.
-Write-Host "Logging into Azure..." -ForegroundColor Cyan
+# Check if the resource group exists and create it if not
+Write-Host "Checking for Resource Group '$ResourceGroupName'..." -ForegroundColor Yellow
 try {
-    # This is handled by the 'azure/login@v2' action in the workflow.
-    Write-Host "Successfully authenticated." -ForegroundColor Green
+    az group show --resource-group $ResourceGroupName
 }
 catch {
-    Write-Host "Azure login failed." -ForegroundColor Red
-    return
+    Write-Host "Resource Group '$ResourceGroupName' not found. Creating it now..." -ForegroundColor Cyan
+    try {
+        az group create --name $ResourceGroupName --location $VMLocation
+        Write-Host "Resource Group created." -ForegroundColor Green
+    }
+    catch {
+        Write-Host "An error occurred while creating the resource group." -ForegroundColor Red
+        Write-Host $_.Exception.Message -ForegroundColor Red
+        exit 1
+    }
 }
 
-# Step 2: Create a resource group if it doesn't already exist.
-Write-Host "Checking for Resource Group '$ResourceGroupName'..." -ForegroundColor Cyan
-$resourceGroup = az group show --name $ResourceGroupName -ErrorAction SilentlyContinue
-
-if ($null -eq $resourceGroup) {
-    Write-Host "Resource Group '$ResourceGroupName' not found. Creating it now..."
-    az group create --name $ResourceGroupName --location $VMLocation
-    Write-Host "Resource Group created." -ForegroundColor Green
-} else {
-    Write-Host "Resource Group '$ResourceGroupName' already exists. Using existing group." -ForegroundColor Yellow
-}
-
-# Step 3: Loop through the VM names and provision each one.
+# Loop through each VM name and provision the necessary resources
 foreach ($vmName in $VMNames) {
-    Provision-VM `
-        -Name $vmName `
-        -ResourceGroup $ResourceGroupName `
-        -Location $VMLocation `
-        -Username $AdminUsername `
-        -SshKeyFile $AdminSshKeyFile
+    Write-Host "Starting the provisioning process for VM '$vmName' in location '$VMLocation'..." -ForegroundColor Yellow
+
+    try {
+        # Create virtual network and subnet
+        Write-Host "Creating virtual network and subnet..." -ForegroundColor Yellow
+        az network vnet create --resource-group $ResourceGroupName `
+            --name "$vmName-vnet" `
+            --address-prefix 10.0.0.0/16 `
+            --subnet-name "$vmName-subnet" `
+            --subnet-prefix 10.0.0.0/24 > $null
+
+        # Create public IP address
+        Write-Host "Creating public IP address..." -ForegroundColor Yellow
+        $ip = az network public-ip create --resource-group $ResourceGroupName `
+            --name "$vmName-public-ip" `
+            --allocation-method Static `
+            --dns-name "$vmName" `
+            --sku Standard --query publicIp.ipAddress `
+            -o tsv > $null
+
+        # Create network security group
+        Write-Host "Creating network security group..." -ForegroundColor Yellow
+        az network nsg create --resource-group $ResourceGroupName `
+            --name "$vmName-nsg" > $null
+
+        # Create inbound rule for SSH
+        Write-Host "Creating network interface card..." -ForegroundColor Yellow
+        az network nsg rule create --resource-group $ResourceGroupName `
+            --name "Allow-SSH" `
+            --nsg-name "$vmName-nsg" `
+            --priority 1000 `
+            --protocol tcp `
+            --destination-port-ranges 22 > $null
+
+        # Create network interface card
+        Write-Host "Creating network interface card..." -ForegroundColor Yellow
+        az network nic create --resource-group $ResourceGroupName `
+            --name "$vmName-nic" `
+            --vnet-name "$vmName-vnet" `
+            --subnet "$vmName-subnet" `
+            --network-security-group "$vmName-nsg" `
+            --public-ip-address "$vmName-public-ip" > $null
+
+        # Create virtual machine
+        Write-Host "Creating virtual machine '$vmName'..." -ForegroundColor Yellow
+        az vm create --resource-group $ResourceGroupName `
+            --name $vmName `
+            --location $VMLocation `
+            --image Ubuntu2204 `
+            --size Standard_B1s `
+            --admin-username $AdminUsername `
+            --nics "$vmName-nic" `
+            --ssh-key-values (Get-Content $AdminSshKeyFile) > $null
+        
+        Write-Host "VM '$vmName' provisioned successfully." -ForegroundColor Green
+
+    }
+    catch {
+        Write-Host "An error occurred during provisioning of VM '$vmName'." -ForegroundColor Red
+        Write-Host $_.Exception.Message -ForegroundColor Red
+        exit 1
+    }
 }
 
-Write-Host "Provisioning process completed." -ForegroundColor Green
+Write-Host "All virtual machines have been successfully provisioned." -ForegroundColor Green
