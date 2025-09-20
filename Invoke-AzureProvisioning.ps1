@@ -1,122 +1,148 @@
-# This script provisions Azure virtual machines using the Azure CLI.
-# It is designed to be run as part of a GitHub Actions workflow.
+<#
+.SYNOPSIS
+    A reusable PowerShell script to provision one or more virtual machines and their
+    network resources on Azure.
 
+.DESCRIPTION
+    This script is designed to be executed as part of a CI/CD pipeline.
+    It contains a reusable function for provisioning a new virtual machine, along
+    with its associated public IP, network interface, and network security group.
+    The script then calls this function for each VM defined in the workflow.
+
+.PARAMETER ResourceGroupName
+    The name of the Azure resource group to be used for the deployment.
+
+.PARAMETER VMLocation
+    The Azure region for the virtual machines (e.g., 'eastus').
+
+.PARAMETER VMNames
+    An array of desired names for the virtual machines.
+
+.PARAMETER AdminUsername
+    The administrator username for the virtual machines.
+
+.PARAMETER AdminSshKeyFile
+    The file path to the public SSH key for the administrator user.
+#>
+[CmdletBinding()]
 param (
-    [string]$resourceGroupName,
-    [string]$location,
-    [string]$vmPiholeName,
-    [string]$vmDynatraceName,
-    [string]$username,
-    [string]$sshKeyContent
+    [Parameter(Mandatory = $true)]
+    [string]$ResourceGroupName,
+
+    [Parameter(Mandatory = $true)]
+    [string]$VMLocation,
+
+    [Parameter(Mandatory = $true)]
+    [string[]]$VMNames,
+
+    [Parameter(Mandatory = $true)]
+    [string]$AdminUsername,
+
+    [Parameter(Mandatory = $true)]
+    [string]$AdminSshKeyFile
 )
 
-Write-Host "Starting Azure provisioning process..."
+# A reusable function to provision a single virtual machine and its resources
+function Provision-VM {
+    param(
+        [string]$Name,
+        [string]$ResourceGroup,
+        [string]$Location,
+        [string]$Username,
+        [string]$SshKeyFile
+    )
 
-# Define the common VM size and image
-$vmSize = "Standard_B2s"
-$vmImage = "Canonical:0001-com-ubuntu-server-jammy:22_04-lts-gen2:latest"
+    Write-Host "Starting the provisioning process for VM '$Name' in location '$Location'..." -ForegroundColor Yellow
 
-# Create a resource group if it doesn't exist
-Write-Host "Checking for Resource Group '$resourceGroupName'..."
-az group create --name $resourceGroupName --location $location
+    # Create a virtual network and subnet.
+    $vnetName = "$Name-vnet"
+    $subnetName = "$Name-subnet"
+    Write-Host "Creating virtual network and subnet..." -ForegroundColor Cyan
+    az network vnet create `
+        --resource-group $ResourceGroup `
+        --name $vnetName `
+        --address-prefix 10.0.0.0/16 `
+        --subnet-name $subnetName `
+        --subnet-prefix 10.0.0.0/24 > $null
+    Write-Host "Virtual network created." -ForegroundColor Green
 
-# --- Networking Setup ---
-Write-Host "Creating Virtual Network and Subnet..."
-$vnetName = "main-vnet"
-$subnetName = "default-subnet"
-az network vnet create `
-    --resource-group $resourceGroupName `
-    --name $vnetName `
-    --address-prefix 10.0.0.0/16 `
-    --subnet-name $subnetName `
-    --subnet-prefix 10.0.0.0/24 `
-    --location $location
+    # Create a public IP address.
+    $publicIpName = "$Name-public-ip"
+    Write-Host "Creating public IP address..." -ForegroundColor Cyan
+    az network public-ip create `
+        --resource-group $ResourceGroup `
+        --name $publicIpName `
+        --location $Location `
+        --allocation-method Static > $null
+    Write-Host "Public IP created." -ForegroundColor Green
 
-# Create Public IP Addresses first, before the NICs
-Write-Host "Creating Public IP Addresses..."
-az network public-ip create `
-    --resource-group $resourceGroupName `
-    --name "pihole-public-ip" `
-    --location $location `
-    --sku Standard
+    # Create a network security group (NSG).
+    $nsgName = "$Name-nsg"
+    Write-Host "Creating network security group..." -ForegroundColor Cyan
+    az network nsg create `
+        --resource-group $ResourceGroup `
+        --name $nsgName > $null
+    Write-Host "NSG created." -ForegroundColor Green
 
-az network public-ip create `
-    --resource-group $resourceGroupName `
-    --name "dynatrace-public-ip" `
-    --location $location `
-    --sku Standard
+    # Create a network interface card (NIC).
+    $nicName = "$Name-nic"
+    Write-Host "Creating network interface card..." -ForegroundColor Cyan
+    az network nic create `
+        --resource-group $ResourceGroup `
+        --name $nicName `
+        --vnet-name $vnetName `
+        --subnet $subnetName `
+        --network-security-group $nsgName `
+        --public-ip-address $publicIpName > $null
+    Write-Host "NIC created." -ForegroundColor Green
 
-# --- Create NSGs ---
-Write-Host "Creating Network Security Groups..."
-$piholeNsgName = "pihole-nsg"
-$dynatraceNsgName = "dynatrace-nsg"
-az network nsg create --resource-group $resourceGroupName --name $piholeNsgName --location $location
-az network nsg create --resource-group $resourceGroupName --name $dynatraceNsgName --location $location
+    # Create the virtual machine.
+    Write-Host "Creating virtual machine '$Name'..." -ForegroundColor Cyan
+    az vm create `
+        --resource-group $ResourceGroup `
+        --name $Name `
+        --location $Location `
+        --image Ubuntu2204 `
+        --size Standard_B2s `
+        --public-ip-address "$Name-public-ip" `
+        --nics $nicName `
+        --admin-username $Username `
+        --ssh-key-values (Get-Content $SshKeyFile) > $null
 
-# Wait until NSGs exist to avoid race conditions
-Start-Sleep -Seconds 5
+    Write-Host "Virtual machine '$Name' successfully created." -ForegroundColor Green
+}
 
-# --- Provision the Pi-hole NIC ---
-$piholeNicName = "pihole-nic"
-Write-Host "Creating NIC for Pi-hole..."
-az network nic create `
-    --resource-group $resourceGroupName `
-    --name $piholeNicName `
-    --vnet-name $vnetName `
-    --subnet $subnetName `
-    --network-security-group $piholeNsgName `
-    --public-ip-address "pihole-public-ip" `
-    --location $location
+# Step 1: Login to Azure using a service principal.
+Write-Host "Logging into Azure..." -ForegroundColor Cyan
+try {
+    # This is handled by the 'azure/login@v2' action in the workflow.
+    Write-Host "Successfully authenticated." -ForegroundColor Green
+}
+catch {
+    Write-Host "Azure login failed." -ForegroundColor Red
+    return
+}
 
-# --- Provision the Pi-hole VM ---
-Write-Host "Provisioning Pi-hole VM '$vmPiholeName'..."
-az vm create `
-    --resource-group $resourceGroupName `
-    --name $vmPiholeName `
-    --location $location `
-    --image $vmImage `
-    --size $vmSize `
-    --nics $piholeNicName `
-    --admin-username $username `
-    --ssh-key-value $sshKeyContent `
-    --tags project="pihole"
+# Step 2: Create a resource group if it doesn't already exist.
+Write-Host "Checking for Resource Group '$ResourceGroupName'..." -ForegroundColor Cyan
+$resourceGroup = az group show --name $ResourceGroupName -ErrorAction SilentlyContinue
 
-# --- Add NSG rules for Pi-hole ---
-Write-Host "Adding NSG rules for Pi-hole..."
-az network nsg rule create --resource-group $resourceGroupName --nsg-name $piholeNsgName --name "allow-dns-tcp" --priority 100 --direction Inbound --access Allow --protocol Tcp --source-address-prefixes "*" --source-port-ranges "*" --destination-address-prefixes "*" --destination-port-ranges 53
-az network nsg rule create --resource-group $resourceGroupName --nsg-name $piholeNsgName --name "allow-dns-udp" --priority 101 --direction Inbound --access Allow --protocol Udp --source-address-prefixes "*" --source-port-ranges "*" --destination-address-prefixes "*" --destination-port-ranges 53
-az network nsg rule create --resource-group $resourceGroupName --nsg-name $piholeNsgName --name "allow-http" --priority 102 --direction Inbound --access Allow --protocol Tcp --source-address-prefixes "*" --source-port-ranges "*" --destination-address-prefixes "*" --destination-port-ranges 80
-az network nsg rule create --resource-group $resourceGroupName --nsg-name $piholeNsgName --name "allow-ssh" --priority 103 --direction Inbound --access Allow --protocol Tcp --source-address-prefixes "*" --source-port-ranges "*" --destination-address-prefixes "*" --destination-port-ranges 22
+if ($null -eq $resourceGroup) {
+    Write-Host "Resource Group '$ResourceGroupName' not found. Creating it now..."
+    az group create --name $ResourceGroupName --location $VMLocation
+    Write-Host "Resource Group created." -ForegroundColor Green
+} else {
+    Write-Host "Resource Group '$ResourceGroupName' already exists. Using existing group." -ForegroundColor Yellow
+}
 
-# --- Provision the Dynatrace NIC ---
-$dynatraceNicName = "dynatrace-nic"
-Write-Host "Creating NIC for Dynatrace..."
-az network nic create `
-    --resource-group $resourceGroupName `
-    --name $dynatraceNicName `
-    --vnet-name $vnetName `
-    --subnet $subnetName `
-    --network-security-group $dynatraceNsgName `
-    --public-ip-address "dynatrace-public-ip" `
-    --location $location
+# Step 3: Loop through the VM names and provision each one.
+foreach ($vmName in $VMNames) {
+    Provision-VM `
+        -Name $vmName `
+        -ResourceGroup $ResourceGroupName `
+        -Location $VMLocation `
+        -Username $AdminUsername `
+        -SshKeyFile $AdminSshKeyFile
+}
 
-# --- Provision the Dynatrace VM ---
-Write-Host "Provisioning Dynatrace VM '$vmDynatraceName'..."
-az vm create `
-    --resource-group $resourceGroupName `
-    --name $vmDynatraceName `
-    --location $location `
-    --image $vmImage `
-    --size $vmSize `
-    --os-disk-size-gb 100 `
-    --nics $dynatraceNicName `
-    --admin-username $username `
-    --ssh-key-value $sshKeyContent `
-    --tags project="dynatrace"
-
-# --- Add NSG rules for Dynatrace ---
-Write-Host "Adding NSG rules for Dynatrace..."
-az network nsg rule create --resource-group $resourceGroupName --nsg-name $dynatraceNsgName --name "allow-dynatrace" --priority 100 --direction Inbound --access Allow --protocol Tcp --source-address-prefixes "*" --source-port-ranges "*" --destination-address-prefixes "*" --destination-port-ranges 9999
-az network nsg rule create --resource-group $resourceGroupName --nsg-name $dynatraceNsgName --name "allow-ssh" --priority 101 --direction Inbound --access Allow --protocol Tcp --source-address-prefixes "*" --source-port-ranges "*" --destination-address-prefixes "*" --destination-port-ranges 22
-
-Write-Host "All Azure resources have been provisioned successfully."
+Write-Host "Provisioning process completed." -ForegroundColor Green

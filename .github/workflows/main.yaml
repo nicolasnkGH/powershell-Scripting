@@ -2,50 +2,60 @@ name: Provision Azure Infrastructure
 
 on:
   workflow_dispatch:
+    inputs:
+      action:
+        description: 'Choose an action to perform.'
+        required: true
+        type: choice
+        options:
+          - provision
+          - destroy
+      resource_group_name:
+        description: 'The name of the Azure Resource Group to provision to or destroy.'
+        required: true
+        type: string
 
 jobs:
   provision-vms:
+    if: github.event.inputs.action == 'provision'
     runs-on: ubuntu-latest
-    env:
-      AZURE_RESOURCE_GROUP: 'pihole-dynatrace-rg'      # Change this to your desired resource group name
-      AZURE_LOCATION: 'eastus'                         # Change this to your desired Azure region
-      PIHOLE_VM_NAME: 'pihole-vm'                      # Change this to your desired Pi-hole VM name
-      DYNATRACE_VM_NAME: 'dynatrace-vm'                # Change this to your desired Dynatrace VM name
-      VM_USERNAME: 'nicolasnk'                             # Change this to your desired VM username
-
     steps:
-      # Step 1: Check out the latest main branch
       - name: Checkout latest main
         uses: actions/checkout@v4
         with:
           ref: main
 
-      # Step 2: Print workflow commit info
-      - name: Show commit info
-        run: |
-          echo "Workflow triggered by commit: $GITHUB_SHA"
-          echo "Checked out branch: main (latest)"
-
-      # Step 3: Verify provisioning script
-      - name: Verify provisioning script
-        shell: pwsh
-        run: |
-          Write-Host "Top lines of Invoke-AzureProvisioning.ps1:"
-          Get-Content ./Invoke-AzureProvisioning.ps1 | Select-Object -First 10
-
-      # Step 4: Log in to Azure
       - name: Azure Login
         uses: azure/login@v2
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      # Step 5: Run the PowerShell provisioning script
       - name: Run PowerShell provisioning script
         shell: pwsh
         run: |
-          ./Invoke-AzureProvisioning.ps1 -resourceGroupName $env:AZURE_RESOURCE_GROUP `
-            -location $env:AZURE_LOCATION `
-            -vmPiholeName $env:PIHOLE_VM_NAME `
-            -vmDynatraceName $env:DYNATRACE_VM_NAME `
-            -username $env:VM_USERNAME `
-            -sshKeyContent '${{ secrets.SSH_PUBLIC_KEY }}'
+          ./Invoke-AzureProvisioning.ps1 `
+            -ResourceGroupName ${{ github.event.inputs.resource_group_name }} `
+            -VMLocation 'eastus' `
+            -AdminUsername 'admin' `
+            -AdminSshKeyFile "id_rsa.pub" `
+            -VMNames 'pihole-vm','dynatrace-vm'
+  
+  destroy-vms:
+    if: github.event.inputs.action == 'destroy'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout latest main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+          
+      - name: Run PowerShell destruction script
+        shell: pwsh
+        run: |
+          ./Destroy-AzureResources.ps1 `
+            -ResourceGroupName "${{ github.event.inputs.resource_group_name }}"
