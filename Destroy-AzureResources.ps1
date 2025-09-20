@@ -24,7 +24,9 @@ Write-Host "Checking for the existence of resource group '$ResourceGroupName'...
 
 # Check if the resource group exists before attempting to remove it
 try {
-    $resourceGroup = Get-AzResourceGroup -Name $ResourceGroupName -ErrorAction Stop
+    # This line attempts to get the resource group. We don't need to store the result,
+    # we just care if the command succeeds without an error.
+    Get-AzResourceGroup -Name $ResourceGroupName -ErrorAction Stop
 }
 catch {
     Write-Host "Resource group '$ResourceGroupName' not found. Nothing to do." -ForegroundColor Green
