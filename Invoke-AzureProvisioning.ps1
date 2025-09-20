@@ -20,7 +20,13 @@ $vmImage = "Canonical:0001-com-ubuntu-server-jammy:22_04-lts-gen2:latest"
 Write-Host "Checking for Resource Group '$resourceGroupName'..."
 az group create --name $resourceGroupName --location $location
 
-# --- Provision the Pi-hole VM ---
+# --- Provision the Pi-hole VM and NSG ---
+Write-Host "Creating Pi-hole Network Security Group..."
+az network nsg create `
+    --resource-group $resourceGroupName `
+    --name "pihole-nsg" `
+    --location $location
+
 Write-Host "Provisioning Pi-hole VM '$vmPiholeName'..."
 az vm create `
     --resource-group $resourceGroupName `
@@ -30,9 +36,8 @@ az vm create `
     --size $vmSize `
     --admin-username $username `
     --ssh-key-value $sshKeyContent `
-    --nsg-rule NONE `
     --public-ip-sku Standard `
-    --nsg-name "pihole-nsg" `
+    --nsg "pihole-nsg" `
     --tags project="pihole"
 
 Write-Host "Provisioned Pi-hole VM."
@@ -41,7 +46,7 @@ Write-Host "Provisioned Pi-hole VM."
 az network nsg rule create `
     --resource-group $resourceGroupName `
     --nsg-name "pihole-nsg" `
-    --name "allow-dns" `
+    --name "allow-dns-tcp" `
     --priority 100 `
     --direction Inbound `
     --access Allow `
@@ -90,7 +95,17 @@ az network nsg rule create `
     --destination-address-prefixes "*" `
     --destination-port-ranges 22
 
-# --- Provision the Dynatrace VM ---
+# --- Provision the Dynatrace VM and NSG ---
+# Note: For this PoC, we will use the default OS disk. However, for best practices
+# and production environments, it's recommended to provision a separate data disk for logs
+# and other application data.
+# The NSG must be created before the VM.
+Write-Host "Creating Dynatrace Network Security Group..."
+az network nsg create `
+    --resource-group $resourceGroupName `
+    --name "dynatrace-nsg" `
+    --location $location
+
 Write-Host "Provisioning Dynatrace VM '$vmDynatraceName'..."
 az vm create `
     --resource-group $resourceGroupName `
@@ -101,9 +116,8 @@ az vm create `
     --os-disk-size-gb 100 `
     --admin-username $username `
     --ssh-key-value $sshKeyContent `
-    --nsg-rule NONE `
     --public-ip-sku Standard `
-    --nsg-name "dynatrace-nsg" `
+    --nsg "dynatrace-nsg" `
     --tags project="dynatrace"
 
 Write-Host "Provisioned Dynatrace VM."
