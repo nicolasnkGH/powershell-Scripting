@@ -12,13 +12,13 @@ param (
 
 Write-Host "Starting Azure provisioning process..."
 
-# --- Define common VM size and image ---
+# Define the common VM size and image
 $vmSize = "Standard_B2s"
 $vmImage = "Canonical:0001-com-ubuntu-server-jammy:22_04-lts-gen2:latest"
 
-# --- Create Resource Group ---
+# Create a resource group if it doesn't exist
 Write-Host "Checking for Resource Group '$resourceGroupName'..."
-az group create --name $resourceGroupName --location $location | Out-Null
+az group create --name $resourceGroupName --location $location
 
 # --- Networking Setup ---
 Write-Host "Creating Virtual Network and Subnet..."
@@ -30,24 +30,35 @@ az network vnet create `
     --address-prefix 10.0.0.0/16 `
     --subnet-name $subnetName `
     --subnet-prefix 10.0.0.0/24 `
-    --location $location | Out-Null
+    --location $location
 
-# --- Provision Pi-hole VM ---
-Write-Host "Creating Pi-hole Network Security Group..."
-$piholeNsgName = "pihole-nsg"
-az network nsg create `
+# Create Public IP Addresses first, before the NICs
+Write-Host "Creating Public IP Addresses..."
+az network public-ip create `
     --resource-group $resourceGroupName `
-    --name $piholeNsgName `
-    --location $location | Out-Null
+    --name "pihole-public-ip" `
+    --location $location `
+    --sku Standard
 
-Write-Host "Adding NSG rules for Pi-hole..."
-az network nsg rule create --resource-group $resourceGroupName --nsg-name $piholeNsgName --name "allow-dns-tcp" --priority 100 --direction Inbound --access Allow --protocol Tcp --destination-port-ranges 53 | Out-Null
-az network nsg rule create --resource-group $resourceGroupName --nsg-name $piholeNsgName --name "allow-dns-udp" --priority 101 --direction Inbound --access Allow --protocol Udp --destination-port-ranges 53 | Out-Null
-az network nsg rule create --resource-group $resourceGroupName --nsg-name $piholeNsgName --name "allow-http" --priority 102 --direction Inbound --access Allow --protocol Tcp --destination-port-ranges 80 | Out-Null
-az network nsg rule create --resource-group $resourceGroupName --nsg-name $piholeNsgName --name "allow-ssh" --priority 103 --direction Inbound --access Allow --protocol Tcp --destination-port-ranges 22 | Out-Null
+az network public-ip create `
+    --resource-group $resourceGroupName `
+    --name "dynatrace-public-ip" `
+    --location $location `
+    --sku Standard
 
-Write-Host "Creating NIC for Pi-hole..."
+# --- Create NSGs ---
+Write-Host "Creating Network Security Groups..."
+$piholeNsgName = "pihole-nsg"
+$dynatraceNsgName = "dynatrace-nsg"
+az network nsg create --resource-group $resourceGroupName --name $piholeNsgName --location $location
+az network nsg create --resource-group $resourceGroupName --name $dynatraceNsgName --location $location
+
+# Wait until NSGs exist to avoid race conditions
+Start-Sleep -Seconds 5
+
+# --- Provision the Pi-hole NIC ---
 $piholeNicName = "pihole-nic"
+Write-Host "Creating NIC for Pi-hole..."
 az network nic create `
     --resource-group $resourceGroupName `
     --name $piholeNicName `
@@ -55,8 +66,9 @@ az network nic create `
     --subnet $subnetName `
     --network-security-group $piholeNsgName `
     --public-ip-address "pihole-public-ip" `
-    --location $location | Out-Null
+    --location $location
 
+# --- Provision the Pi-hole VM ---
 Write-Host "Provisioning Pi-hole VM '$vmPiholeName'..."
 az vm create `
     --resource-group $resourceGroupName `
@@ -67,24 +79,18 @@ az vm create `
     --nics $piholeNicName `
     --admin-username $username `
     --ssh-key-value $sshKeyContent `
-    --tags project="pihole" | Out-Null
+    --tags project="pihole"
 
-Write-Host "Pi-hole VM provisioned successfully."
+# --- Add NSG rules for Pi-hole ---
+Write-Host "Adding NSG rules for Pi-hole..."
+az network nsg rule create --resource-group $resourceGroupName --nsg-name $piholeNsgName --name "allow-dns-tcp" --priority 100 --direction Inbound --access Allow --protocol Tcp --source-address-prefixes "*" --source-port-ranges "*" --destination-address-prefixes "*" --destination-port-ranges 53
+az network nsg rule create --resource-group $resourceGroupName --nsg-name $piholeNsgName --name "allow-dns-udp" --priority 101 --direction Inbound --access Allow --protocol Udp --source-address-prefixes "*" --source-port-ranges "*" --destination-address-prefixes "*" --destination-port-ranges 53
+az network nsg rule create --resource-group $resourceGroupName --nsg-name $piholeNsgName --name "allow-http" --priority 102 --direction Inbound --access Allow --protocol Tcp --source-address-prefixes "*" --source-port-ranges "*" --destination-address-prefixes "*" --destination-port-ranges 80
+az network nsg rule create --resource-group $resourceGroupName --nsg-name $piholeNsgName --name "allow-ssh" --priority 103 --direction Inbound --access Allow --protocol Tcp --source-address-prefixes "*" --source-port-ranges "*" --destination-address-prefixes "*" --destination-port-ranges 22
 
-# --- Provision Dynatrace VM ---
-Write-Host "Creating Dynatrace Network Security Group..."
-$dynatraceNsgName = "dynatrace-nsg"
-az network nsg create `
-    --resource-group $resourceGroupName `
-    --name $dynatraceNsgName `
-    --location $location | Out-Null
-
-Write-Host "Adding NSG rules for Dynatrace..."
-az network nsg rule create --resource-group $resourceGroupName --nsg-name $dynatraceNsgName --name "allow-dynatrace" --priority 100 --direction Inbound --access Allow --protocol Tcp --destination-port-ranges 9999 | Out-Null
-az network nsg rule create --resource-group $resourceGroupName --nsg-name $dynatraceNsgName --name "allow-ssh" --priority 101 --direction Inbound --access Allow --protocol Tcp --destination-port-ranges 22 | Out-Null
-
-Write-Host "Creating NIC for Dynatrace..."
+# --- Provision the Dynatrace NIC ---
 $dynatraceNicName = "dynatrace-nic"
+Write-Host "Creating NIC for Dynatrace..."
 az network nic create `
     --resource-group $resourceGroupName `
     --name $dynatraceNicName `
@@ -92,8 +98,9 @@ az network nic create `
     --subnet $subnetName `
     --network-security-group $dynatraceNsgName `
     --public-ip-address "dynatrace-public-ip" `
-    --location $location | Out-Null
+    --location $location
 
+# --- Provision the Dynatrace VM ---
 Write-Host "Provisioning Dynatrace VM '$vmDynatraceName'..."
 az vm create `
     --resource-group $resourceGroupName `
@@ -105,8 +112,11 @@ az vm create `
     --nics $dynatraceNicName `
     --admin-username $username `
     --ssh-key-value $sshKeyContent `
-    --tags project="dynatrace" | Out-Null
+    --tags project="dynatrace"
 
-Write-Host "Dynatrace VM provisioned successfully."
+# --- Add NSG rules for Dynatrace ---
+Write-Host "Adding NSG rules for Dynatrace..."
+az network nsg rule create --resource-group $resourceGroupName --nsg-name $dynatraceNsgName --name "allow-dynatrace" --priority 100 --direction Inbound --access Allow --protocol Tcp --source-address-prefixes "*" --source-port-ranges "*" --destination-address-prefixes "*" --destination-port-ranges 9999
+az network nsg rule create --resource-group $resourceGroupName --nsg-name $dynatraceNsgName --name "allow-ssh" --priority 101 --direction Inbound --access Allow --protocol Tcp --source-address-prefixes "*" --source-port-ranges "*" --destination-address-prefixes "*" --destination-port-ranges 22
 
 Write-Host "All Azure resources have been provisioned successfully."
