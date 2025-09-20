@@ -20,11 +20,35 @@ $vmImage = "Canonical:0001-com-ubuntu-server-jammy:22_04-lts-gen2:latest"
 Write-Host "Checking for Resource Group '$resourceGroupName'..."
 az group create --name $resourceGroupName --location $location
 
-# --- Provision the Pi-hole VM and NSG ---
+# --- Networking Setup ---
+Write-Host "Creating Virtual Network and Subnet..."
+$vnetName = "main-vnet"
+$subnetName = "default-subnet"
+az network vnet create `
+    --resource-group $resourceGroupName `
+    --name $vnetName `
+    --address-prefix 10.0.0.0/16 `
+    --subnet-name $subnetName `
+    --subnet-prefix 10.0.0.0/24 `
+    --location $location
+
+# --- Provision the Pi-hole VM ---
 Write-Host "Creating Pi-hole Network Security Group..."
+$piholeNsgName = "pihole-nsg"
 az network nsg create `
     --resource-group $resourceGroupName `
-    --name "pihole-nsg" `
+    --name $piholeNsgName `
+    --location $location
+
+Write-Host "Creating Network Interface Card (NIC) for Pi-hole..."
+$piholeNicName = "pihole-nic"
+az network nic create `
+    --resource-group $resourceGroupName `
+    --name $piholeNicName `
+    --vnet-name $vnetName `
+    --subnet $subnetName `
+    --network-security-group $piholeNsgName `
+    --public-ip-address "pihole-public-ip" `
     --location $location
 
 Write-Host "Provisioning Pi-hole VM '$vmPiholeName'..."
@@ -34,10 +58,9 @@ az vm create `
     --location $location `
     --image $vmImage `
     --size $vmSize `
+    --nics $piholeNicName `
     --admin-username $username `
     --ssh-key-value $sshKeyContent `
-    --public-ip-sku Standard `
-    --nsg "pihole-nsg" `
     --tags project="pihole"
 
 Write-Host "Provisioned Pi-hole VM."
@@ -45,7 +68,7 @@ Write-Host "Provisioned Pi-hole VM."
 # Add required Network Security Group rules for Pi-hole
 az network nsg rule create `
     --resource-group $resourceGroupName `
-    --nsg-name "pihole-nsg" `
+    --nsg-name $piholeNsgName `
     --name "allow-dns-tcp" `
     --priority 100 `
     --direction Inbound `
@@ -58,7 +81,7 @@ az network nsg rule create `
 
 az network nsg rule create `
     --resource-group $resourceGroupName `
-    --nsg-name "pihole-nsg" `
+    --nsg-name $piholeNsgName `
     --name "allow-dns-udp" `
     --priority 101 `
     --direction Inbound `
@@ -71,7 +94,7 @@ az network nsg rule create `
 
 az network nsg rule create `
     --resource-group $resourceGroupName `
-    --nsg-name "pihole-nsg" `
+    --nsg-name $piholeNsgName `
     --name "allow-http" `
     --priority 102 `
     --direction Inbound `
@@ -84,7 +107,7 @@ az network nsg rule create `
 
 az network nsg rule create `
     --resource-group $resourceGroupName `
-    --nsg-name "pihole-nsg" `
+    --nsg-name $piholeNsgName `
     --name "allow-ssh" `
     --priority 103 `
     --direction Inbound `
@@ -95,15 +118,23 @@ az network nsg rule create `
     --destination-address-prefixes "*" `
     --destination-port-ranges 22
 
-# --- Provision the Dynatrace VM and NSG ---
-# Note: For this PoC, we will use the default OS disk. However, for best practices
-# and production environments, it's recommended to provision a separate data disk for logs
-# and other application data.
-# The NSG must be created before the VM.
+# --- Provision the Dynatrace VM ---
 Write-Host "Creating Dynatrace Network Security Group..."
+$dynatraceNsgName = "dynatrace-nsg"
 az network nsg create `
     --resource-group $resourceGroupName `
-    --name "dynatrace-nsg" `
+    --name $dynatraceNsgName `
+    --location $location
+
+Write-Host "Creating Network Interface Card (NIC) for Dynatrace..."
+$dynatraceNicName = "dynatrace-nic"
+az network nic create `
+    --resource-group $resourceGroupName `
+    --name $dynatraceNicName `
+    --vnet-name $vnetName `
+    --subnet $subnetName `
+    --network-security-group $dynatraceNsgName `
+    --public-ip-address "dynatrace-public-ip" `
     --location $location
 
 Write-Host "Provisioning Dynatrace VM '$vmDynatraceName'..."
@@ -114,10 +145,9 @@ az vm create `
     --image $vmImage `
     --size $vmSize `
     --os-disk-size-gb 100 `
+    --nics $dynatraceNicName `
     --admin-username $username `
     --ssh-key-value $sshKeyContent `
-    --public-ip-sku Standard `
-    --nsg "dynatrace-nsg" `
     --tags project="dynatrace"
 
 Write-Host "Provisioned Dynatrace VM."
@@ -126,7 +156,7 @@ Write-Host "Provisioned Dynatrace VM."
 # Dynatrace ActiveGate uses port 9999 for incoming connections
 az network nsg rule create `
     --resource-group $resourceGroupName `
-    --nsg-name "dynatrace-nsg" `
+    --nsg-name $dynatraceNsgName `
     --name "allow-dynatrace" `
     --priority 100 `
     --direction Inbound `
@@ -139,7 +169,7 @@ az network nsg rule create `
 
 az network nsg rule create `
     --resource-group $resourceGroupName `
-    --nsg-name "dynatrace-nsg" `
+    --nsg-name $dynatraceNsgName `
     --name "allow-ssh" `
     --priority 101 `
     --direction Inbound `
