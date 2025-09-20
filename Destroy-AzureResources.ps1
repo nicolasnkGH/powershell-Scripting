@@ -17,7 +17,9 @@
 [CmdletBinding()]
 param (
     [Parameter(Mandatory = $true)]
-    [string]$ResourceGroupName
+    [string]$ResourceGroupName,
+
+    [switch]$Force
 )
 
 Write-Host "Checking for the existence of resource group '$ResourceGroupName'..." -ForegroundColor Yellow
@@ -31,15 +33,17 @@ catch {
     return
 }
 
-# Prompt for confirmation to avoid accidental deletion
-Write-Host "WARNING: This will permanently delete the resource group '$ResourceGroupName' and all its contents." -ForegroundColor Red
-Write-Host "Are you sure you want to proceed? (Y/N)" -ForegroundColor Red
+# Prompt for confirmation to avoid accidental deletion unless the -Force parameter is used.
+if (-not $Force) {
+    Write-Host "WARNING: This will permanently delete the resource group '$ResourceGroupName' and all its contents." -ForegroundColor Red
+    Write-Host "Are you sure you want to proceed? (Y/N)" -ForegroundColor Red
 
-$confirm = Read-Host
+    $confirm = Read-Host
 
-if ($confirm -ne "Y" -and $confirm -ne "y") {
-    Write-Host "Deletion canceled." -ForegroundColor Cyan
-    return
+    if ($confirm -ne "Y" -and $confirm -ne "y") {
+        Write-Host "Deletion canceled." -ForegroundColor Cyan
+        return
+    }
 }
 
 Write-Host "Deleting resource group '$ResourceGroupName'..." -ForegroundColor Yellow
