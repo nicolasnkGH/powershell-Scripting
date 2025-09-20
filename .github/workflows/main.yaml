@@ -15,6 +15,11 @@ on:
         description: 'The name of the Azure Resource Group to provision to or destroy.'
         required: true
 
+# Add permissions for the ID token to be generated. This is required for OIDC.
+permissions:
+  id-token: write
+  contents: read
+
 jobs:
   provision-vms:
     runs-on: ubuntu-latest
@@ -23,25 +28,21 @@ jobs:
       - name: Checkout latest main
         uses: actions/checkout@v4
 
-      # Step 2: Verify provisioning script
-      - name: Verify provisioning script
-        run: |
-          Get-Content ./Invoke-AzureProvisioning.ps1
-        shell: pwsh
-
-      # Step 3: Azure Login
+      # Step 2: Azure Login using OpenID Connect (OIDC) for enhanced security
       - name: Azure Login
         uses: azure/login@v2
         with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      # Step 4: Create SSH key file from secret
+      # Step 3: Create SSH key file from secret
       - name: Create SSH key file from secret
         run: |
           echo "${{ secrets.SSH_KEY_PUBLIC }}" > id_rsa.pub
         shell: bash
 
-      # Step 5: Run PowerShell provisioning script
+      # Step 4: Run PowerShell provisioning script
       - name: Run PowerShell provisioning script
         if: ${{ github.event.inputs.action == 'provision' }}
         run: |
@@ -53,7 +54,7 @@ jobs:
             -VMNames 'pihole-vm','dynatrace-vm'
         shell: pwsh
 
-      # Step 6: Run PowerShell destruction script
+      # Step 5: Run PowerShell destruction script
       - name: Run PowerShell destruction script
         if: ${{ github.event.inputs.action == 'destroy' }}
         run: |
