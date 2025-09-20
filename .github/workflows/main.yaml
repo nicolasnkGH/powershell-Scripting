@@ -9,58 +9,47 @@ on:
         type: choice
         options:
           - provision
-          - destroy
-
-env:
-  AZURE_RESOURCE_GROUP: 'pihole-dynatrace-rg'
-  AZURE_LOCATION: 'eastus'
-  VM_USERNAME: 'nicolasnk'
-  
-permissions:
-  id-token: write
-  contents: read
+      resource-group-name:
+        description: 'The name of the Azure Resource Group to provision to or destroy.'
+        required: true
 
 jobs:
   provision-vms:
-    if: github.event.inputs.action == 'provision'
     runs-on: ubuntu-latest
+    env:
+      AZURE_LOCATION: 'eastus'
+      VM_USERNAME: 'nicolasnk'
+
     steps:
       - name: Checkout latest main
         uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Verify provisioning script
+        shell: pwsh
+        run: |
+          Write-Host "Top lines of Invoke-AzureProvisioning.ps1:"
+          Get-Content ./Invoke-AzureProvisioning.ps1 | Select-Object -First 10
 
       - name: Azure Login
         uses: azure/login@v2
         with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Create SSH key file from secret
+        run: |
+          echo "${{ secrets.SSH_KEY_PUBLIC }}" > id_rsa.pub
+        shell: bash
 
       - name: Run PowerShell provisioning script
+        if: ${{ github.event.inputs.action == 'provision' }}
         shell: pwsh
         run: |
           ./Invoke-AzureProvisioning.ps1 `
-            -ResourceGroupName $env:AZURE_RESOURCE_GROUP `
-            -VMLocation $env:AZURE_LOCATION `
-            -AdminUsername $env:VM_USERNAME `
-            -AdminSshKeyFile "id_rsa.pub" `
-            -VMNames 'pihole-vm','dynatrace-vm'
-  
-  destroy-vms:
-    if: github.event.inputs.action == 'destroy'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout latest main
-        uses: actions/checkout@v4
-
-      - name: Azure Login
-        uses: azure/login@v2
-        with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-          
-      - name: Run PowerShell destruction script
-        shell: pwsh
-        run: |
-          ./Destroy-AzureResources.ps1 `
-            -ResourceGroupName "$ENV:AZURE_RESOURCE_GROUP"
+            -resourceGroupName ${{ github.event.inputs.resource-group-name }} `
+            -location $env:AZURE_LOCATION `
+            -username $env:VM_USERNAME `
+            -sshKeyContent '${{ secrets.SSH_PUBLIC_KEY }}' `
+            -vmPiholeName pihole-vm `
+            -vmDynatraceName dynatrace-vm
