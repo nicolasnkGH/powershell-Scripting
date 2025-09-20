@@ -18,15 +18,23 @@ jobs:
       # This step makes the script files available to the runner.
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # ensures the workflow has the full history and latest commit
+      # Step 2: Verify the provisioning script
+      - name: Verify provisioning script
+        shell: pwsh
+        run: |
+          Write-Host "Top lines of Invoke-AzureProvisioning.ps1:"
+          Get-Content ./Invoke-AzureProvisioning.ps1 | Select-Object -First 10
 
-      # Step 2: Log in to Azure
+      # Step 3: Log in to Azure
       # This step uses the 'AZURE_CREDENTIALS' secret you just created to authenticate.
       - name: Azure Login
         uses: azure/login@v2
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      # Step 3: Run the PowerShell provisioning script
+      # Step 4: Run the PowerShell provisioning script
       # The script will create all the Azure resources.
       - name: Run PowerShell provisioning script
         shell: pwsh
