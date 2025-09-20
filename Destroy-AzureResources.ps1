@@ -33,7 +33,8 @@ catch {
     return
 }
 
-# Prompt for confirmation to avoid accidental deletion unless the -Force parameter is used.
+# The -Force parameter is used to suppress the confirmation prompt in non-interactive sessions
+# such as a GitHub Actions runner.
 if (-not $Force) {
     Write-Host "WARNING: This will permanently delete the resource group '$ResourceGroupName' and all its contents." -ForegroundColor Red
     Write-Host "Are you sure you want to proceed? (Y/N)" -ForegroundColor Red
