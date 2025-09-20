@@ -25,6 +25,7 @@ jobs:
       - name: Verify provisioning script
         run: |
           Get-Content ./Invoke-AzureProvisioning.ps1
+        shell: pwsh
 
       - name: Azure Login
         uses: azure/login@v2
@@ -33,7 +34,6 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      # This new step writes the secret to a file.
       - name: Create SSH key file from secret
         run: |
           echo "${{ secrets.SSH_KEY_PUBLIC }}" > id_rsa.pub
