@@ -14,34 +14,35 @@ jobs:
       VM_USERNAME: 'admin'                             # Change this to your desired VM username
 
     steps:
-      # Step 1: Check out the repository code
-      # This step makes the script files available to the runner.
-      - name: Checkout code
+      # Step 1: Check out the latest main branch
+      - name: Checkout latest main
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0   # ensures the workflow has the full history and latest commit
-      # Step 2: Verify the provisioning script
+          ref: main
+
+      # Step 2: Print workflow commit info
+      - name: Show commit info
+        run: |
+          echo "Workflow triggered by commit: $GITHUB_SHA"
+          echo "Checked out branch: main (latest)"
+
+      # Step 3: Verify provisioning script
       - name: Verify provisioning script
         shell: pwsh
         run: |
           Write-Host "Top lines of Invoke-AzureProvisioning.ps1:"
           Get-Content ./Invoke-AzureProvisioning.ps1 | Select-Object -First 10
 
-      # Step 3: Log in to Azure
-      # This step uses the 'AZURE_CREDENTIALS' secret you just created to authenticate.
+      # Step 4: Log in to Azure
       - name: Azure Login
         uses: azure/login@v2
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      # Step 4: Run the PowerShell provisioning script
-      # The script will create all the Azure resources.
+      # Step 5: Run the PowerShell provisioning script
       - name: Run PowerShell provisioning script
         shell: pwsh
         run: |
-          # The SSH key path is a placeholder. In a real scenario,
-          # you would also store your SSH public key as a GitHub secret
-          # and reference it here for a fully automated setup.
           ./Invoke-AzureProvisioning.ps1 -resourceGroupName $env:AZURE_RESOURCE_GROUP `
             -location $env:AZURE_LOCATION `
             -vmPiholeName $env:PIHOLE_VM_NAME `
