@@ -2,54 +2,53 @@ name: Provision Azure Infrastructure
 
 on:
   workflow_dispatch:
-    inputs:
-      action:
-        description: 'Choose an action to perform.'
-        required: true
-        type: choice
-        options:
-          - provision
-      resource-group-name:
-        description: 'The name of the Azure Resource Group to provision to or destroy.'
-        required: true
 
 jobs:
   provision-vms:
     runs-on: ubuntu-latest
     env:
-      AZURE_LOCATION: 'eastus'
-      VM_USERNAME: 'nicolasnk'
+      AZURE_RESOURCE_GROUP: 'pihole-dynatrace-rg'      # Change this to your desired resource group name
+      AZURE_LOCATION: 'eastus'                         # Change this to your desired Azure region
+      PIHOLE_VM_NAME: 'pihole-vm'                      # Change this to your desired Pi-hole VM name
+      DYNATRACE_VM_NAME: 'dynatrace-vm'                # Change this to your desired Dynatrace VM name
+      VM_USERNAME: 'admin'                             # Change this to your desired VM username
 
     steps:
+      # Step 1: Check out the latest main branch
       - name: Checkout latest main
         uses: actions/checkout@v4
         with:
           ref: main
 
+      # Step 2: Print workflow commit info
+      - name: Show commit info
+        run: |
+          echo "Workflow triggered by commit: $GITHUB_SHA"
+          echo "Checked out branch: main (latest)"
+
+      # Step 3: Verify provisioning script
       - name: Verify provisioning script
         shell: pwsh
         run: |
           Write-Host "Top lines of Invoke-AzureProvisioning.ps1:"
           Get-Content ./Invoke-AzureProvisioning.ps1 | Select-Object -First 10
 
+      # Step 4: Log in to Azure
       - name: Azure Login
         uses: azure/login@v2
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      - name: Create SSH key file from secret
-        run: |
-          echo "${{ secrets.SSH_KEY_PUBLIC }}" > id_rsa.pub
-        shell: bash
-
+      # Step 5: Run the PowerShell provisioning script
       - name: Run PowerShell provisioning script
-        if: ${{ github.event.inputs.action == 'provision' }}
         shell: pwsh
         run: |
-          ./Invoke-AzureProvisioning.ps1 `
-            -resourceGroupName ${{ github.event.inputs.resource-group-name }} `
+          # The SSH key path is a placeholder. In a real scenario,
+          # you would also store your SSH public key as a GitHub secret
+          # and reference it here for a fully automated setup.
+          ./Invoke-AzureProvisioning.ps1 -resourceGroupName $env:AZURE_RESOURCE_GROUP `
             -location $env:AZURE_LOCATION `
+            -vmPiholeName $env:PIHOLE_VM_NAME `
+            -vmDynatraceName $env:DYNATRACE_VM_NAME `
             -username $env:VM_USERNAME `
-            -sshKeyContent '${{ secrets.SSH_PUBLIC_KEY }}' `
-            -vmPiholeName pihole-vm `
-            -vmDynatraceName dynatrace-vm
+            -sshKeyContent '${{ secrets.SSH_PUBLIC_KEY }}'
