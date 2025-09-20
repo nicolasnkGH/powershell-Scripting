@@ -32,16 +32,20 @@ az network vnet create `
     --subnet-prefix 10.0.0.0/24 `
     --location $location
 
-# --- Provision the Pi-hole VM ---
-Write-Host "Creating Pi-hole Network Security Group..."
+# --- Create NSGs ---
 $piholeNsgName = "pihole-nsg"
-az network nsg create `
-    --resource-group $resourceGroupName `
-    --name $piholeNsgName `
-    --location $location
+$dynatraceNsgName = "dynatrace-nsg"
 
-Write-Host "Creating Network Interface Card (NIC) for Pi-hole..."
+Write-Host "Creating Network Security Groups..."
+az network nsg create --resource-group $resourceGroupName --name $piholeNsgName --location $location
+az network nsg create --resource-group $resourceGroupName --name $dynatraceNsgName --location $location
+
+# Wait until NSGs exist to avoid race conditions
+Start-Sleep -Seconds 5
+
+# --- Provision the Pi-hole NIC ---
 $piholeNicName = "pihole-nic"
+Write-Host "Creating NIC for Pi-hole..."
 az network nic create `
     --resource-group $resourceGroupName `
     --name $piholeNicName `
@@ -51,6 +55,7 @@ az network nic create `
     --public-ip-address "pihole-public-ip" `
     --location $location
 
+# --- Provision the Pi-hole VM ---
 Write-Host "Provisioning Pi-hole VM '$vmPiholeName'..."
 az vm create `
     --resource-group $resourceGroupName `
@@ -63,71 +68,16 @@ az vm create `
     --ssh-key-value $sshKeyContent `
     --tags project="pihole"
 
-Write-Host "Provisioned Pi-hole VM."
+# --- Add NSG rules for Pi-hole ---
+Write-Host "Adding NSG rules for Pi-hole..."
+az network nsg rule create --resource-group $resourceGroupName --nsg-name $piholeNsgName --name "allow-dns-tcp" --priority 100 --direction Inbound --access Allow --protocol Tcp --source-address-prefixes "*" --source-port-ranges "*" --destination-address-prefixes "*" --destination-port-ranges 53
+az network nsg rule create --resource-group $resourceGroupName --nsg-name $piholeNsgName --name "allow-dns-udp" --priority 101 --direction Inbound --access Allow --protocol Udp --source-address-prefixes "*" --source-port-ranges "*" --destination-address-prefixes "*" --destination-port-ranges 53
+az network nsg rule create --resource-group $resourceGroupName --nsg-name $piholeNsgName --name "allow-http" --priority 102 --direction Inbound --access Allow --protocol Tcp --source-address-prefixes "*" --source-port-ranges "*" --destination-address-prefixes "*" --destination-port-ranges 80
+az network nsg rule create --resource-group $resourceGroupName --nsg-name $piholeNsgName --name "allow-ssh" --priority 103 --direction Inbound --access Allow --protocol Tcp --source-address-prefixes "*" --source-port-ranges "*" --destination-address-prefixes "*" --destination-port-ranges 22
 
-# Add required Network Security Group rules for Pi-hole
-az network nsg rule create `
-    --resource-group $resourceGroupName `
-    --nsg-name $piholeNsgName `
-    --name "allow-dns-tcp" `
-    --priority 100 `
-    --direction Inbound `
-    --access Allow `
-    --protocol Tcp `
-    --source-address-prefixes "*" `
-    --source-port-ranges "*" `
-    --destination-address-prefixes "*" `
-    --destination-port-ranges 53
-
-az network nsg rule create `
-    --resource-group $resourceGroupName `
-    --nsg-name $piholeNsgName `
-    --name "allow-dns-udp" `
-    --priority 101 `
-    --direction Inbound `
-    --access Allow `
-    --protocol Udp `
-    --source-address-prefixes "*" `
-    --source-port-ranges "*" `
-    --destination-address-prefixes "*" `
-    --destination-port-ranges 53
-
-az network nsg rule create `
-    --resource-group $resourceGroupName `
-    --nsg-name $piholeNsgName `
-    --name "allow-http" `
-    --priority 102 `
-    --direction Inbound `
-    --access Allow `
-    --protocol Tcp `
-    --source-address-prefixes "*" `
-    --source-port-ranges "*" `
-    --destination-address-prefixes "*" `
-    --destination-port-ranges 80
-
-az network nsg rule create `
-    --resource-group $resourceGroupName `
-    --nsg-name $piholeNsgName `
-    --name "allow-ssh" `
-    --priority 103 `
-    --direction Inbound `
-    --access Allow `
-    --protocol Tcp `
-    --source-address-prefixes "*" `
-    --source-port-ranges "*" `
-    --destination-address-prefixes "*" `
-    --destination-port-ranges 22
-
-# --- Provision the Dynatrace VM ---
-Write-Host "Creating Dynatrace Network Security Group..."
-$dynatraceNsgName = "dynatrace-nsg"
-az network nsg create `
-    --resource-group $resourceGroupName `
-    --name $dynatraceNsgName `
-    --location $location
-
-Write-Host "Creating Network Interface Card (NIC) for Dynatrace..."
+# --- Provision the Dynatrace NIC ---
 $dynatraceNicName = "dynatrace-nic"
+Write-Host "Creating NIC for Dynatrace..."
 az network nic create `
     --resource-group $resourceGroupName `
     --name $dynatraceNicName `
@@ -137,6 +87,7 @@ az network nic create `
     --public-ip-address "dynatrace-public-ip" `
     --location $location
 
+# --- Provision the Dynatrace VM ---
 Write-Host "Provisioning Dynatrace VM '$vmDynatraceName'..."
 az vm create `
     --resource-group $resourceGroupName `
@@ -150,34 +101,9 @@ az vm create `
     --ssh-key-value $sshKeyContent `
     --tags project="dynatrace"
 
-Write-Host "Provisioned Dynatrace VM."
-
-# Add required Network Security Group rules for Dynatrace ActiveGate
-# Dynatrace ActiveGate uses port 9999 for incoming connections
-az network nsg rule create `
-    --resource-group $resourceGroupName `
-    --nsg-name $dynatraceNsgName `
-    --name "allow-dynatrace" `
-    --priority 100 `
-    --direction Inbound `
-    --access Allow `
-    --protocol Tcp `
-    --source-address-prefixes "*" `
-    --source-port-ranges "*" `
-    --destination-address-prefixes "*" `
-    --destination-port-ranges 9999
-
-az network nsg rule create `
-    --resource-group $resourceGroupName `
-    --nsg-name $dynatraceNsgName `
-    --name "allow-ssh" `
-    --priority 101 `
-    --direction Inbound `
-    --access Allow `
-    --protocol Tcp `
-    --source-address-prefixes "*" `
-    --source-port-ranges "*" `
-    --destination-address-prefixes "*" `
-    --destination-port-ranges 22
+# --- Add NSG rules for Dynatrace ---
+Write-Host "Adding NSG rules for Dynatrace..."
+az network nsg rule create --resource-group $resourceGroupName --nsg-name $dynatraceNsgName --name "allow-dynatrace" --priority 100 --direction Inbound --access Allow --protocol Tcp --source-address-prefixes "*" --source-port-ranges "*" --destination-address-prefixes "*" --destination-port-ranges 9999
+az network nsg rule create --resource-group $resourceGroupName --nsg-name $dynatraceNsgName --name "allow-ssh" --priority 101 --direction Inbound --access Allow --protocol Tcp --source-address-prefixes "*" --source-port-ranges "*" --destination-address-prefixes "*" --destination-port-ranges 22
 
 Write-Host "All Azure resources have been provisioned successfully."
