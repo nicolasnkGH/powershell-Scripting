@@ -22,11 +22,9 @@ param (
 
 Write-Host "Checking for the existence of resource group '$ResourceGroupName'..." -ForegroundColor Yellow
 
-# Check if the resource group exists before attempting to remove it
+# Use the az group show command to check for the resource group's existence
 try {
-    # This line attempts to get the resource group. We don't need to store the result,
-    # we just care if the command succeeds without an error.
-    Get-AzResourceGroup -Name $ResourceGroupName -ErrorAction Stop
+    az group show --name $ResourceGroupName -o json -o json | Out-Null
 }
 catch {
     Write-Host "Resource group '$ResourceGroupName' not found. Nothing to do." -ForegroundColor Green
