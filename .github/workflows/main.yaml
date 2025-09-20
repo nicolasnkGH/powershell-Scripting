@@ -1,0 +1,42 @@
+name: Provision Azure Infrastructure
+
+on:
+  workflow_dispatch:
+
+jobs:
+  provision-vms:
+    runs-on: ubuntu-latest
+    env:
+      AZURE_RESOURCE_GROUP: 'pihole-dynatrace-rg'      # Change this to your desired resource group name
+      AZURE_LOCATION: 'eastus'                         # Change this to your desired Azure region
+      PIHOLE_VM_NAME: 'pihole-vm'                      # Change this to your desired Pi-hole VM name
+      DYNATRACE_VM_NAME: 'dynatrace-vm'                # Change this to your desired Dynatrace VM name
+      VM_USERNAME: 'admin'                             # Change this to your desired VM username
+
+    steps:
+      # Step 1: Check out the repository code
+      # This step makes the script files available to the runner.
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Step 2: Log in to Azure
+      # This step uses the 'AZURE_CREDENTIALS' secret you just created to authenticate.
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      # Step 3: Run the PowerShell provisioning script
+      # The script will create all the Azure resources.
+      - name: Run PowerShell provisioning script
+        shell: pwsh
+        run: |
+          # The SSH key path is a placeholder. In a real scenario,
+          # you would also store your SSH public key as a GitHub secret
+          # and reference it here for a fully automated setup.
+          ./Invoke-AzureProvisioning.ps1 -resourceGroupName $env:AZURE_RESOURCE_GROUP `
+            -location $env:AZURE_LOCATION `
+            -vmPiholeName $env:PIHOLE_VM_NAME `
+            -vmDynatraceName $env:DYNATRACE_VM_NAME `
+            -username $env:VM_USERNAME `
+            -sshKeyContent '${{ secrets.SSH_PUBLIC_KEY }}'
