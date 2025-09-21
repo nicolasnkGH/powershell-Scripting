@@ -52,3 +52,27 @@ jobs:
             -vmDynatraceName $env:DYNATRACE_VM_NAME `
             -username $env:VM_USERNAME `
             -sshKeyContent '${{ secrets.SSH_PUBLIC_KEY }}'
+
+      # Step 6: Install applications on the VMs
+      - name: Get VM Public IPs
+        id: get_ips
+        run: |
+          PIHOLE_IP=$(az network public-ip list --query "[?contains(name, '${{ env.PIHOLE_VM_NAME }}')].ipAddress" -o tsv)
+          DYNATRACE_IP=$(az network public-ip list --query "[?contains(name, '${{ env.DYNATRACE_VM_NAME }}')].ipAddress" -o tsv)
+          echo "PIHOLE_IP=$PIHOLE_IP" >> $GITHUB_ENV
+          echo "DYNATRACE_IP=$DYNATRACE_IP" >> $GITHUB_ENV
+          echo "Pi-hole VM IP: $PIHOLE_IP"
+          echo "Dynatrace VM IP: $DYNATRACE_IP"
+
+      - name: Install Pi-hole
+        run: |
+          pwsh -File ./provision-pihole-dynatrace.ps1 -VmPublicIp "${{ env.PIHOLE_IP }}" -VmUsername "${{ env.VM_USERNAME }}" -SshPrivateKeyPath "~/.ssh/id_rsa"
+
+      - name: Install Dynatrace
+        run: |
+          pwsh -File ./provision-pihole-dynatrace.ps1 -VmPublicIp "${{ env.DYNATRACE_IP }}" -VmUsername "${{ env.VM_USERNAME }}" -SshPrivateKeyPath "~/.ssh/id_rsa"
+
+      - name: Clean up resources (optional but recommended)
+        if: always()
+        run: |
+          az group delete --name "${{ env.AZURE_RESOURCE_GROUP }}" --yes --no-wait
