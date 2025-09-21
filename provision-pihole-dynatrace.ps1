@@ -1,5 +1,18 @@
 # Script to deploy Pi-hole and Dynatrace on Linux VMs
 
+param (
+    [Parameter(Mandatory = $true)]
+    [string]$VmPublicIp,
+    [Parameter(Mandatory = $true)]
+    [string]$VmUsername,
+    [Parameter(Mandatory = $true)]
+    [string]$SshPrivateKeyPath,
+    [Parameter(Mandatory = $false)]
+    [string]$DynatraceApiToken,
+    [Parameter(Mandatory = $false)]
+    [string]$DynatraceEnvUrl
+)
+
 function Install-Pihole {
     [CmdletBinding()]
     param (
@@ -96,7 +109,7 @@ function Install-Dynatrace {
         Write-Host "Downloading and installing Dynatrace OneAgent..."
         $dynatraceCommand = "ssh -v -i $SshPrivateKeyPath -o StrictHostKeyChecking=no ${VmUsername}@${VmPublicIp} `"sudo apt-get update && sudo apt-get install -y wget && wget -O /tmp/dynatrace-oneagent.sh '$DynatraceEnvUrl/api/v1/deployment/installer/agent/unix/default/latest?Api-Token=$DynatraceApiToken&arch=x86_64&flavor=default' && sudo sh /tmp/dynatrace-oneagent.sh`""
         Write-Host "Executing: $dynatraceCommand"
-        Invoke-Expression $dynatraceCommand 2>&1
+        Invoke-Expression $sshCommand 2>&1
 
         Write-Host "Dynatrace deployment completed."
     }
@@ -107,19 +120,6 @@ function Install-Dynatrace {
 }
 
 # Main execution
-param (
-    [Parameter(Mandatory = $true)]
-    [string]$VmPublicIp,
-    [Parameter(Mandatory = $true)]
-    [string]$VmUsername,
-    [Parameter(Mandatory = $true)]
-    [string]$SshPrivateKeyPath,
-    [Parameter(Mandatory = $false)]
-    [string]$DynatraceApiToken,
-    [Parameter(Mandatory = $false)]
-    [string]$DynatraceEnvUrl
-)
-
 if ($VmPublicIp -eq $env:PIHOLE_IP) {
     Install-Pihole -VmPublicIp $VmPublicIp -VmUsername $VmUsername -SshPrivateKeyPath $SshPrivateKeyPath
 }
