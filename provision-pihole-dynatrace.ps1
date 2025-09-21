@@ -16,25 +16,50 @@ function Install-Pihole {
     try {
         # Check if the VM is reachable with verbose output
         Write-Host "Testing SSH connection..."
-        ssh -v -i $SshPrivateKeyPath -o StrictHostKeyChecking=no "$VmUsername@$VmPublicIp" "echo 'Connected successfully.'" 2>&1
+        $sshCommand = "ssh -v -i $SshPrivateKeyPath -o StrictHostKeyChecking=no ${VmUsername}@${VmPublicIp} `"echo 'Connected successfully.'`""
+        Write-Host "Executing: $sshCommand"
+        Invoke-Expression $sshCommand 2>&1
 
-        # Execute Pi-hole installer via SSH with explicit bash invocation
-        Write-Host "Running Pi-hole one-step installer..."
-        ssh -v -i $SshPrivateKeyPath -o StrictHostKeyChecking=no "$VmUsername@$VmPublicIp" /bin/bash << 'EOF' 2>&1
-            # Ensure curl is installed
-            if ! command -v curl >/dev/null 2>&1; then
-                echo "Error: curl not found, installing..."
-                sudo apt-get update && sudo apt-get install -y curl
-            fi
-            # Run Pi-hole installer
-            curl -sSL https://install.pi-hole.net | bash --unattended
-            if [ $? -ne 0 ]; then
-                echo "Error: Pi-hole installation failed"
-                exit 1
-            fi
-            echo "Pi-hole installation completed successfully"
-EOF
+        # Create temporary bash script for Pi-hole installation
+        $piholeScript = "/tmp/install-pihole.sh"
+        $scriptContent = @"
+#!/bin/bash
+# Ensure curl is installed
+if ! command -v curl >/dev/null 2>&1; then
+    echo "Installing curl..."
+    sudo apt-get update && sudo apt-get install -y curl
+    if [ \$? -ne 0 ]; then
+        echo "Error: Failed to install curl"
+        exit 1
+    fi
+fi
+# Run Pi-hole installer
+echo "Running Pi-hole installer..."
+curl -sSL https://install.pi-hole.net | bash --unattended
+if [ \$? -ne 0 ]; then
+    echo "Error: Pi-hole installation failed"
+    exit 1
+fi
+echo "Pi-hole installation completed successfully"
+"@
+        # Write script to local file
+        Set-Content -Path $piholeScript -Value $scriptContent
+        Write-Host "Created temporary script $piholeScript"
 
+        # Copy script to remote VM
+        Write-Host "Copying Pi-hole install script to VM..."
+        $scpCommand = "scp -i $SshPrivateKeyPath -o StrictHostKeyChecking=no $piholeScript ${VmUsername}@${VmPublicIp}:/tmp/install-pihole.sh"
+        Write-Host "Executing: $scpCommand"
+        Invoke-Expression $scpCommand 2>&1
+
+        # Execute script on remote VM
+        Write-Host "Executing Pi-hole install script..."
+        $sshExecCommand = "ssh -v -i $SshPrivateKeyPath -o StrictHostKeyChecking=no ${VmUsername}@${VmPublicIp} `"chmod +x /tmp/install-pihole.sh && /bin/bash /tmp/install-pihole.sh`""
+        Write-Host "Executing: $sshExecCommand"
+        Invoke-Expression $sshExecCommand 2>&1
+
+        # Clean up local script
+        Remove-Item -Path $piholeScript -Force
         Write-Host "Pi-hole deployment completed."
     }
     catch {
@@ -63,11 +88,15 @@ function Install-Dynatrace {
     try {
         # Check if the VM is reachable with verbose output
         Write-Host "Testing SSH connection..."
-        ssh -v -i $SshPrivateKeyPath -o StrictHostKeyChecking=no "$VmUsername@$VmPublicIp" "echo 'Connected successfully.'" 2>&1
+        $sshCommand = "ssh -v -i $SshPrivateKeyPath -o StrictHostKeyChecking=no ${VmUsername}@${VmPublicIp} `"echo 'Connected successfully.'`""
+        Write-Host "Executing: $sshCommand"
+        Invoke-Expression $sshCommand 2>&1
 
         # Install wget if not present, then download and install Dynatrace OneAgent
         Write-Host "Downloading and installing Dynatrace OneAgent..."
-        ssh -v -i $SshPrivateKeyPath -o StrictHostKeyChecking=no "$VmUsername@$VmPublicIp" "sudo apt-get update && sudo apt-get install -y wget && wget -O /tmp/dynatrace-oneagent.sh '$DynatraceEnvUrl/api/v1/deployment/installer/agent/unix/default/latest?Api-Token=$DynatraceApiToken&arch=x86_64&flavor=default' && sudo sh /tmp/dynatrace-oneagent.sh" 2>&1
+        $dynatraceCommand = "ssh -v -i $SshPrivateKeyPath -o StrictHostKeyChecking=no ${VmUsername}@${VmPublicIp} `"sudo apt-get update && sudo apt-get install -y wget && wget -O /tmp/dynatrace-oneagent.sh '$DynatraceEnvUrl/api/v1/deployment/installer/agent/unix/default/latest?Api-Token=$DynatraceApiToken&arch=x86_64&flavor=default' && sudo sh /tmp/dynatrace-oneagent.sh`""
+        Write-Host "Executing: $dynatraceCommand"
+        Invoke-Expression $dynatraceCommand 2>&1
 
         Write-Host "Dynatrace deployment completed."
     }
