@@ -1,96 +1,53 @@
-# Simple Azure VM Provisioning with GitHub Actions
+# Pi-hole and Dynatrace Deployment (Dev Branch)
 
-## 🚀 Project Overview
-This project demonstrates **Infrastructure as Code (IaC)** by provisioning Azure virtual machines using:
-
-- **PowerShell scripts** (`Invoke-AzureProvisioning.ps1`) to run Azure CLI commands  
-- **YAML workflow** (`.github/workflows/main.yaml`) to automate everything via **GitHub Actions**  
-
-The result is a **repeatable, automated process** for creating and managing Azure infrastructure.
-
+**Status:** 🚧 Work in Progress  
 
 ---
 
-## 📂 Key Files
-- **`.github/workflows/main.yaml`**  
-  Defines the GitHub Actions workflow. Handles logging into Azure and running the provisioning script.  
-  > You can customize VM names, resource group, and other settings directly in this file.  
+## 📖 Overview
+This **dev branch** is a backup of the latest `main` branch, which includes code to provision Azure VMs and install **Pi-hole** and **Dynatrace**.  
 
-- **`Invoke-AzureProvisioning.ps1`**  
-  PowerShell script containing all the **Azure CLI commands** for creating resources:
-  - Resource group  
-  - Virtual network  
-  - Network security groups  
-  - Two virtual machines  
+⚠️ The installation is incomplete due to an issue where the **`pihole-FTL` service fails to start**.
 
 ---
 
-## ⚙️ How to Use
-
-### 1. Configure GitHub Secrets
-This workflow requires your **Azure credentials** and **SSH public key**.  
-Create the following repository secrets in **Settings → Secrets → Actions**:
-
-- `AZURE_CREDENTIALS` → Your Azure Service Principal credentials  
-- `SSH_PUBLIC_KEY` → The content of your SSH public key  
+## 📂 Files
+- **Invoke-AzureProvisioning.ps1** → Provisions Azure VMs  
+- **provision-pihole-dynatrace.ps1** → Installs Pi-hole and Dynatrace (work in progress)  
+- **main.yaml** → GitHub Actions workflow for provisioning and installing applications  
 
 ---
 
-### 2. Trigger the Workflow
-1. Navigate to the **Actions** tab in your GitHub repo  
-2. Select **Provision Azure Infrastructure** workflow  
-3. Click **Run workflow**  
-
-The provisioning process will begin automatically. ✅
+## ❗ Current Issue
+- The `pihole-FTL` service does not run after Pi-hole installation.  
+- This causes the workflow to fail during the **"Verify Pi-hole installation"** step.  
 
 ---
 
-## 🎛️ Customization
-To customize resource names or settings, edit the **environment variables** in `.github/workflows/main.yaml`:
+## ▶️ Running the Workflow
 
-```yaml
-name: Provision Azure Infrastructure
-
-jobs:
-  provision-vms:
-    runs-on: ubuntu-latest
-    env:
-      AZURE_RESOURCE_GROUP: 'your-resource-group'
-      AZURE_LOCATION: 'your-azure-region'
-      PIHOLE_VM_NAME: 'your-pihole-vm'
-      DYNATRACE_VM_NAME: 'your-dynatrace-vm'
-      VM_USERNAME: 'your-username'
-```
+1. Switch to the dev branch:
+   ```bash
+   git checkout dev
+   ```
 ---
 
-## ✅ Provisioning Success!
-The result is a **repeatable, automated process** for creating and managing Azure infrastructure.
+2. Ensure GitHub Secrets are set:
+- AZURE_CREDENTIALS
+- SSH_PRIVATE_KEY
+- SSH_PUBLIC_KEY
+- DYNATRACE_API_TOKEN
+- DYNATRACE_ENV_URL
 
-<p align="center">
-  <img src="screenshots/azure-resources.png" width="300" alt="Azure resources created by the workflow" />
-  <img src="screenshots/github-actions-workflow.png" width="300" alt="GitHub Actions workflow status" />
-  <img src="screenshots/event-initiated-by-github-actions.png" width="300" alt="GitHub Actions workflow run event" />
-</p>
+3. Trigger the workflow in GitHub Actions under "Pi-hole & Dynatrace Deployment on Azure"
+   
+4. Check logs for errors in:
+- **Install Pi-hole**
+- **Verify Pi-hole installation**
 
 ---
 
-## Notes
-
-- This project demonstrates Infrastructure as Code (IaC) using GitHub Actions + PowerShell.
-- Future enhancements will allow the workflow to prompt for inputs so you can choose whether to provision or destroy resources dynamically.
-- Ideal for learning CI/CD + Azure automation in a real-world DevOps scenario.
-
----
-
-## 🛠️ Roadmap / To-Do
-
-- [x] Provision Azure VMs using GitHub Actions + PowerShell
-- [x] Add screenshots to validate provisioning
-- [ ] Create **Destroy-AzureResources.ps1** to tear down infrastructure
-- [ ] Add script to deploy **Pi-hole** on VM1
-- [ ] Add script to deploy **Dynatrace** on VM2
-- [ ] Update workflows to accept **user inputs** (resource group, VM names, action: provision/destroy)
-- [ ] Make scripts fully reusable without manual edits
-
----
-
+## Next Steps
+- [ ] Debug the pihole-FTL service failure
+- [ ] Consider using Bash scripts for installation
+- [ ] Verify VM resources and network settings (e.g., ports 53 and 80)
