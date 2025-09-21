@@ -48,28 +48,46 @@ jobs:
           # Add known hosts to avoid prompts
           ssh-keyscan -H ${{ env.PIHOLE_IP }} >> ~/.ssh/known_hosts 2>/dev/null || true
           ssh-keyscan -H ${{ env.DYNATRACE_IP }} >> ~/.ssh/known_hosts 2>/dev/null || true
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+      - name: Debug Azure resources
+        run: |
+          echo "Listing resource groups..."
+          az group list --query "[].name" -o tsv
+          echo "Listing public IPs in resource group ${{ env.AZURE_RESOURCE_GROUP }}..."
+          az network public-ip list --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --query "[].{name:name, ipAddress:ipAddress}" -o table
+      - name: Get Pi-hole VM Public IP
+        id: get-pihole-ip
+        run: |
+          echo "Checking if pihole-public-ip exists..."
+          az network public-ip show --resource-group "${{ env.AZURE_RESOURCE_GROUP }}" --name "pihole-public-ip" --query "name" -o tsv || { echo "Error: Public IP pihole-public-ip not found"; exit 1; }
+          PIHOLE_IP=$(az network public-ip show --resource-group "${{ env.AZURE_RESOURCE_GROUP }}" --name "pihole-public-ip" --query "ipAddress" -o tsv)
+          if [ -z "$PIHOLE_IP" ]; then
+            echo "Error: Failed to retrieve Pi-hole VM public IP"
+            exit 1
+          fi
+          echo "PIHOLE_IP=$PIHOLE_IP" >> $GITHUB_ENV
+          echo "Pi-hole VM IP: $PIHOLE_IP"
+      - name: Get Dynatrace VM Public IP
+        id: get-dynatrace-ip
+        run: |
+          echo "Checking if dynatrace-public-ip exists..."
+          az network public-ip show --resource-group "${{ env.AZURE_RESOURCE_GROUP }}" --name "dynatrace-public-ip" --query "name" -o tsv || { echo "Error: Public IP dynatrace-public-ip not found"; exit 1; }
+          DYNATRACE_IP=$(az network public-ip show --resource-group "${{ env.AZURE_RESOURCE_GROUP }}" --name "dynatrace-public-ip" --query "ipAddress" -o tsv)
+          if [ -z "$DYNATRACE_IP" ]; then
+            echo "Error: Failed to retrieve Dynatrace VM public IP"
+            exit 1
+          fi
+          echo "DYNATRACE_IP=$DYNATRACE_IP" >> $GITHUB_ENV
+          echo "Dynatrace VM IP: $DYNATRACE_IP"
       - name: Test SSH connectivity
         run: |
           echo "Testing SSH to Pi-hole VM (${{ env.PIHOLE_IP }})..."
           ssh -v -i ${{ env.SSH_KEY_PATH }} -o StrictHostKeyChecking=no ${{ env.VM_USERNAME }}@${{ env.PIHOLE_IP }} "echo 'SSH test successful'" || { echo "Error: Failed to connect to Pi-hole VM"; exit 1; }
           echo "Testing SSH to Dynatrace VM (${{ env.DYNATRACE_IP }})..."
           ssh -v -i ${{ env.SSH_KEY_PATH }} -o StrictHostKeyChecking=no ${{ env.VM_USERNAME }}@${{ env.DYNATRACE_IP }} "echo 'SSH test successful'" || { echo "Error: Failed to connect to Dynatrace VM"; exit 1; }
-      - name: Azure Login
-        uses: azure/login@v2
-        with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
-      - name: Get Pi-hole VM Public IP
-        id: get-pihole-ip
-        run: |
-          PIHOLE_IP=$(az network public-ip show --resource-group "${{ env.AZURE_RESOURCE_GROUP }}" --name "pihole-public-ip" --query "ipAddress" -o tsv)
-          echo "PIHOLE_IP=$PIHOLE_IP" >> $GITHUB_ENV
-          echo "Pi-hole VM IP: $PIHOLE_IP"
-      - name: Get Dynatrace VM Public IP
-        id: get-dynatrace-ip
-        run: |
-          DYNATRACE_IP=$(az network public-ip show --resource-group "${{ env.AZURE_RESOURCE_GROUP }}" --name "dynatrace-public-ip" --query "ipAddress" -o tsv)
-          echo "DYNATRACE_IP=$DYNATRACE_IP" >> $GITHUB_ENV
-          echo "Dynatrace VM IP: $DYNATRACE_IP"
       - name: Install Pi-hole
         shell: pwsh
         run: |
