@@ -18,9 +18,22 @@ function Install-Pihole {
         Write-Host "Testing SSH connection..."
         ssh -v -i $SshPrivateKeyPath -o StrictHostKeyChecking=no "$VmUsername@$VmPublicIp" "echo 'Connected successfully.'" 2>&1
 
-        # Execute Pi-hole one-step installer via SSH
+        # Execute Pi-hole installer via SSH with explicit bash invocation
         Write-Host "Running Pi-hole one-step installer..."
-        ssh -v -i $SshPrivateKeyPath -o StrictHostKeyChecking=no "$VmUsername@$VmPublicIp" "curl -sSL https://install.pi-hole.net | bash --unattended" 2>&1
+        ssh -v -i $SshPrivateKeyPath -o StrictHostKeyChecking=no "$VmUsername@$VmPublicIp" /bin/bash << 'EOF' 2>&1
+            # Ensure curl is installed
+            if ! command -v curl >/dev/null 2>&1; then
+                echo "Error: curl not found, installing..."
+                sudo apt-get update && sudo apt-get install -y curl
+            fi
+            # Run Pi-hole installer
+            curl -sSL https://install.pi-hole.net | bash --unattended
+            if [ $? -ne 0 ]; then
+                echo "Error: Pi-hole installation failed"
+                exit 1
+            fi
+            echo "Pi-hole installation completed successfully"
+EOF
 
         Write-Host "Pi-hole deployment completed."
     }

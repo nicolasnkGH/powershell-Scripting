@@ -45,6 +45,9 @@ jobs:
           # Validate key
           ssh-keygen -y -P "" -f ${{ env.SSH_KEY_PATH }} > ~/.ssh/id_gh_actions.pub.test || { echo "Error: SSH private key is invalid (likely not a private key)"; exit 1; }
           echo "SSH key fingerprint: $(ssh-keygen -lf ${{ env.SSH_KEY_PATH }})"
+          # Add known hosts to avoid prompts
+          ssh-keyscan -H ${{ env.PIHOLE_IP }} >> ~/.ssh/known_hosts 2>/dev/null || true
+          ssh-keyscan -H ${{ env.DYNATRACE_IP }} >> ~/.ssh/known_hosts 2>/dev/null || true
       - name: Azure Login
         uses: azure/login@v2
         with:
@@ -98,7 +101,7 @@ jobs:
       - name: Install Pi-hole
         shell: pwsh
         run: |
-          ./provision-pihole-dynatrace.ps1 -VmPublicIp "${{ env.PIHOLE_IP }}" -VmUsername "${{ env.VM_USERNAME }}" -SshPrivateKeyPath "${{ env.SSH_KEY_PATH }}"
+          pwsh -File ./provision-pihole-dynatrace.ps1 -VmPublicIp "${{ env.PIHOLE_IP }}" -VmUsername "${{ env.VM_USERNAME }}" -SshPrivateKeyPath "${{ env.SSH_KEY_PATH }}"
       - name: Wait for Pi-hole to stabilize
         run: |
           echo "Waiting 60 seconds for Pi-hole to stabilize..."
@@ -119,7 +122,7 @@ jobs:
       - name: Install Dynatrace
         shell: pwsh
         run: |
-          ./provision-pihole-dynatrace.ps1 -VmPublicIp "${{ env.DYNATRACE_IP }}" -VmUsername "${{ env.VM_USERNAME }}" -SshPrivateKeyPath "${{ env.SSH_KEY_PATH }}" -DynatraceApiToken "${{ secrets.DYNATRACE_API_TOKEN }}" -DynatraceEnvUrl "${{ secrets.DYNATRACE_ENV_URL }}"
+          pwsh -File ./provision-pihole-dynatrace.ps1 -VmPublicIp "${{ env.DYNATRACE_IP }}" -VmUsername "${{ env.VM_USERNAME }}" -SshPrivateKeyPath "${{ env.SSH_KEY_PATH }}" -DynatraceApiToken "${{ secrets.DYNATRACE_API_TOKEN }}" -DynatraceEnvUrl "${{ secrets.DYNATRACE_ENV_URL }}"
       - name: Wait for Dynatrace to stabilize
         run: |
           echo "Waiting 60 seconds for Dynatrace to stabilize..."
