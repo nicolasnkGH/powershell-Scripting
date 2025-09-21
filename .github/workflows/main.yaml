@@ -32,14 +32,28 @@ jobs:
     env:
       AZURE_RESOURCE_GROUP: pihole-dynatrace-rg
       VM_USERNAME: nicolasnk
+      SSH_KEY_PATH: ~/.ssh/id_gh_actions
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
       - name: Set up SSH key for VMs
         run: |
           mkdir -p ~/.ssh/
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" | tr -d '\r' > ~/.ssh/id_rsa
-          chmod 600 ~/.ssh/id_rsa
+          # Use printf to preserve exact key format
+          printf '%s\n' "${{ secrets.SSH_PRIVATE_KEY }}" > ${{ env.SSH_KEY_PATH }}
+          chmod 600 ${{ env.SSH_KEY_PATH }}
+          # Validate key
+          ssh-keygen -y -P "" -f ${{ env.SSH_KEY_PATH }} > ~/.ssh/id_gh_actions.pub.test || { echo "Error: SSH private key is invalid (likely not a private key)"; exit 1; }
+          echo "SSH key fingerprint: $(ssh-keygen -lf ${{ env.SSH_KEY_PATH }})"
+          # Add known hosts to avoid prompts
+          ssh-keyscan -H ${{ env.PIHOLE_IP }} >> ~/.ssh/known_hosts 2>/dev/null || true
+          ssh-keyscan -H ${{ env.DYNATRACE_IP }} >> ~/.ssh/known_hosts 2>/dev/null || true
+      - name: Test SSH connectivity
+        run: |
+          echo "Testing SSH to Pi-hole VM (${{ env.PIHOLE_IP }})..."
+          ssh -v -i ${{ env.SSH_KEY_PATH }} -o StrictHostKeyChecking=no ${{ env.VM_USERNAME }}@${{ env.PIHOLE_IP }} "echo 'SSH test successful'" || { echo "Error: Failed to connect to Pi-hole VM"; exit 1; }
+          echo "Testing SSH to Dynatrace VM (${{ env.DYNATRACE_IP }})..."
+          ssh -v -i ${{ env.SSH_KEY_PATH }} -o StrictHostKeyChecking=no ${{ env.VM_USERNAME }}@${{ env.DYNATRACE_IP }} "echo 'SSH test successful'" || { echo "Error: Failed to connect to Dynatrace VM"; exit 1; }
       - name: Azure Login
         uses: azure/login@v2
         with:
@@ -59,14 +73,18 @@ jobs:
       - name: Install Pi-hole
         shell: pwsh
         run: |
-          ./provision-pihole-dynatrace.ps1 -VmPublicIp "${{ env.PIHOLE_IP }}" -VmUsername "${{ env.VM_USERNAME }}" -SshPrivateKeyPath "~/.ssh/id_rsa"
+          ./provision-pihole-dynatrace.ps1 -VmPublicIp "${{ env.PIHOLE_IP }}" -VmUsername "${{ env.VM_USERNAME }}" -SshPrivateKeyPath "${{ env.SSH_KEY_PATH }}"
       - name: Wait for Pi-hole to stabilize
         run: |
           echo "Waiting 60 seconds for Pi-hole to stabilize..."
           sleep 60
       - name: Verify Pi-hole installation
         run: |
-          PIHOLE_STATUS=$(ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no ${{ env.VM_USERNAME }}@${{ env.PIHOLE_IP }} "sudo systemctl is-active pihole-FTL" || echo "failed")
+          for attempt in {1..3}; do
+            echo "Attempt $attempt: Testing SSH connection to ${{ env.PIHOLE_IP }}..."
+            ssh -v -i ${{ env.SSH_KEY_PATH }} -o StrictHostKeyChecking=no ${{ env.VM_USERNAME }}@${{ env.PIHOLE_IP }} "echo 'SSH test successful'" && break || { echo "SSH attempt $attempt failed"; sleep 10; }
+          done
+          PIHOLE_STATUS=$(ssh -i ${{ env.SSH_KEY_PATH }} -o StrictHostKeyChecking=no ${{ env.VM_USERNAME }}@${{ env.PIHOLE_IP }} "sudo systemctl is-active pihole-FTL 2>/dev/null" || echo "failed")
           if [ "$PIHOLE_STATUS" != "active" ]; then
             echo "Error: Pi-hole installation failed or service is not running on ${{ env.PIHOLE_IP }}. Status: $PIHOLE_STATUS"
             exit 1
@@ -76,16 +94,20 @@ jobs:
       - name: Install Dynatrace
         shell: pwsh
         run: |
-          ./provision-pihole-dynatrace.ps1 -VmPublicIp "${{ env.DYNATRACE_IP }}" -VmUsername "${{ env.VM_USERNAME }}" -SshPrivateKeyPath "~/.ssh/id_rsa"
+          ./provision-pihole-dynatrace.ps1 -VmPublicIp "${{ env.DYNATRACE_IP }}" -VmUsername "${{ env.VM_USERNAME }}" -SshPrivateKeyPath "${{ env.SSH_KEY_PATH }}" -DynatraceApiToken "${{ secrets.DYNATRACE_API_TOKEN }}" -DynatraceEnvUrl "${{ secrets.DYNATRACE_ENV_URL }}"
       - name: Wait for Dynatrace to stabilize
         run: |
           echo "Waiting 60 seconds for Dynatrace to stabilize..."
           sleep 60
       - name: Verify Dynatrace installation
         run: |
-          DYNATRACE_STATUS=$(ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no ${{ env.VM_USERNAME }}@${{ env.DYNATRACE_IP }} "pgrep -f dynatrace || echo 'failed'" || echo "failed")
-          if [ "$DYNATRACE_STATUS" = "failed" ]; then
-            echo "Error: Dynatrace installation failed or service is not running on ${{ env.DYNATRACE_IP }}."
+          for attempt in {1..3}; do
+            echo "Attempt $attempt: Testing SSH connection to ${{ env.DYNATRACE_IP }}..."
+            ssh -v -i ${{ env.SSH_KEY_PATH }} -o StrictHostKeyChecking=no ${{ env.VM_USERNAME }}@${{ env.DYNATRACE_IP }} "echo 'SSH test successful'" && break || { echo "SSH attempt $attempt failed"; sleep 10; }
+          done
+          DYNATRACE_STATUS=$(ssh -i ${{ env.SSH_KEY_PATH }} -o StrictHostKeyChecking=no ${{ env.VM_USERNAME }}@${{ env.DYNATRACE_IP }} "pgrep -f dynatrace >/dev/null && echo 'active' || echo 'failed'" || echo "failed")
+          if [ "$DYNATRACE_STATUS" != "active" ]; then
+            echo "Error: Dynatrace installation failed or service is not running on ${{ env.DYNATRACE_IP }}. Status: $DYNATRACE_STATUS"
             exit 1
           else
             echo "Dynatrace is running on ${{ env.DYNATRACE_IP }}"

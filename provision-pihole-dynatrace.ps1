@@ -1,16 +1,12 @@
-# The following two scripts are designed to be run from a GitHub Actions workflow.
-# They require the 'ssh' command to be available in the runner environment to connect to the VMs.
+# Script to deploy Pi-hole and Dynatrace on Linux VMs
 
-# Script to deploy Pi-hole on a Linux VM
 function Install-Pihole {
     [CmdletBinding()]
     param (
         [Parameter(Mandatory = $true)]
         [string]$VmPublicIp,
-
         [Parameter(Mandatory = $true)]
         [string]$VmUsername,
-
         [Parameter(Mandatory = $true)]
         [string]$SshPrivateKeyPath
     )
@@ -18,51 +14,81 @@ function Install-Pihole {
     Write-Host "Starting Pi-hole deployment on VM with IP: $VmPublicIp"
 
     try {
-        # Check if the VM is reachable
-        Write-Host "Attempting to connect to the VM..."
-        ssh -i $SshPrivateKeyPath -o StrictHostKeyChecking=no "$VmUsername@$VmPublicIp" "echo 'Connected successfully.'"
+        # Check if the VM is reachable with verbose output
+        Write-Host "Testing SSH connection..."
+        ssh -v -i $SshPrivateKeyPath -o StrictHostKeyChecking=no "$VmUsername@$VmPublicIp" "echo 'Connected successfully.'" 2>&1
 
-        # Execute Pi-hole installation commands via SSH
-        Write-Host "Running Pi-hole installation script..."
-        ssh -i $SshPrivateKeyPath -o StrictHostKeyChecking=no "$VmUsername@$VmPublicIp" 'sudo apt-get update && sudo apt-get install -y git && git clone https://github.com/pi-hole/pi-hole.git --depth 1 && cd "pi-hole/automated install/" && sudo bash basic-install.sh'
-        
+        # Execute Pi-hole one-step installer via SSH
+        Write-Host "Running Pi-hole one-step installer..."
+        ssh -v -i $SshPrivateKeyPath -o StrictHostKeyChecking=no "$VmUsername@$VmPublicIp" "curl -sSL https://install.pi-hole.net | bash --unattended" 2>&1
+
         Write-Host "Pi-hole deployment completed."
     }
     catch {
-        Write-Error "Failed to install Pi-hole on VM: $_"
+        Write-Error "Failed to install Pi-hole on VM ${VmPublicIp}: $_"
         exit 1
     }
 }
 
-# Script to deploy Dynatrace on a Linux VM
 function Install-Dynatrace {
     [CmdletBinding()]
     param (
         [Parameter(Mandatory = $true)]
         [string]$VmPublicIp,
-
         [Parameter(Mandatory = $true)]
         [string]$VmUsername,
-
         [Parameter(Mandatory = $true)]
-        [string]$SshPrivateKeyPath
+        [string]$SshPrivateKeyPath,
+        [Parameter(Mandatory = $true)]
+        [string]$DynatraceApiToken,
+        [Parameter(Mandatory = $true)]
+        [string]$DynatraceEnvUrl
     )
 
     Write-Host "Starting Dynatrace deployment on VM with IP: $VmPublicIp"
 
     try {
-        # Check if the VM is reachable
-        Write-Host "Attempting to connect to the VM..."
-        ssh -i $SshPrivateKeyPath -o StrictHostKeyChecking=no "$VmUsername@$VmPublicIp" "echo 'Connected successfully.'"
+        # Check if the VM is reachable with verbose output
+        Write-Host "Testing SSH connection..."
+        ssh -v -i $SshPrivateKeyPath -o StrictHostKeyChecking=no "$VmUsername@$VmPublicIp" "echo 'Connected successfully.'" 2>&1
 
-        # Execute Dynatrace installation commands via SSH
-        Write-Host "Downloading and installing Dynatrace agent..."
-        ssh -i $SshPrivateKeyPath -o StrictHostKeyChecking=no "$VmUsername@$VmPublicIp" 'sudo apt-get update && wget -O /tmp/dynatrace-oneagent.sh "https://downloads.dynatrace.com/oneagent/installer/latest/linux/default/installer.sh?arch=x86_64" && sudo sh /tmp/dynatrace-oneagent.sh'
-        
+        # Install wget if not present, then download and install Dynatrace OneAgent
+        Write-Host "Downloading and installing Dynatrace OneAgent..."
+        ssh -v -i $SshPrivateKeyPath -o StrictHostKeyChecking=no "$VmUsername@$VmPublicIp" "sudo apt-get update && sudo apt-get install -y wget && wget -O /tmp/dynatrace-oneagent.sh '$DynatraceEnvUrl/api/v1/deployment/installer/agent/unix/default/latest?Api-Token=$DynatraceApiToken&arch=x86_64&flavor=default' && sudo sh /tmp/dynatrace-oneagent.sh" 2>&1
+
         Write-Host "Dynatrace deployment completed."
     }
     catch {
-        Write-Error "Failed to install Dynatrace on VM: $_"
+        Write-Error "Failed to install Dynatrace on VM ${VmPublicIp}: $_"
         exit 1
     }
+}
+
+# Main execution
+param (
+    [Parameter(Mandatory = $true)]
+    [string]$VmPublicIp,
+    [Parameter(Mandatory = $true)]
+    [string]$VmUsername,
+    [Parameter(Mandatory = $true)]
+    [string]$SshPrivateKeyPath,
+    [Parameter(Mandatory = $false)]
+    [string]$DynatraceApiToken,
+    [Parameter(Mandatory = $false)]
+    [string]$DynatraceEnvUrl
+)
+
+if ($VmPublicIp -eq $env:PIHOLE_IP) {
+    Install-Pihole -VmPublicIp $VmPublicIp -VmUsername $VmUsername -SshPrivateKeyPath $SshPrivateKeyPath
+}
+elseif ($VmPublicIp -eq $env:DYNATRACE_IP) {
+    if (-not $DynatraceApiToken -or -not $DynatraceEnvUrl) {
+        Write-Error "Dynatrace API token and environment URL are required for Dynatrace installation."
+        exit 1
+    }
+    Install-Dynatrace -VmPublicIp $VmPublicIp -VmUsername $VmUsername -SshPrivateKeyPath $SshPrivateKeyPath -DynatraceApiToken $DynatraceApiToken -DynatraceEnvUrl $DynatraceEnvUrl
+}
+else {
+    Write-Error "Invalid VM IP provided: ${VmPublicIp}. Must match PIHOLE_IP or DYNATRACE_IP."
+    exit 1
 }
