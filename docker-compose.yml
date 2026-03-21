@@ -1,0 +1,355 @@
+# Media Download Stack - VPN-Protected ARR Stack with Dual qBittorrent Setup
+# ============================================================================
+# This docker-compose.yml defines a fully automated media management stack
+# that routes all traffic through NordVPN for privacy and security.
+#
+# Architecture:
+# - vpn: NordLynx container (sidecar pattern)
+# - throw_torrent: Temporary downloads - deleted after completion
+# - keep_torrent: Permanent seeding - maintained for upload ratio/reputation
+# - arr-stack: Radarr, Sonarr, Lidarr, Bazarr, Jackett, etc.
+#
+# IMPORTANT: Edit .env file before first run! See .env.example
+
+services:
+  # ============================================================================
+  # VPN Container - NordVPN with NordLynx protocol
+  # ============================================================================
+  vpn:
+    image: ghcr.io/bubuntux/nordvpn
+    container_name: nord_vpn
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    environment:
+      - TOKEN=${VPN_TOKEN}
+      - CONNECT=United_States
+      - TECHNOLOGY=NordLynx
+    sysctls:
+      - net.ipv6.conf.all.disable_ipv6=1
+    healthcheck:
+      test: ["CMD-SHELL", "ping -c 1 www.google.com || exit 1"]
+      interval: 60s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ============================================================================
+  # THROW Torrent - Temporary Downloads
+  # Files are deleted after download completes (used by Radarr/Sonarr)
+  # ===========================================================================
+  throwtorrent:
+    image: lscr.io/linuxserver/qbittorrent:latest
+    container_name: throw_torrent
+    network_mode: "service:vpn"
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-America/New_York}
+      - WEBUI_PORT=8090
+      - TORRENTING_PORT=6881
+    volumes:
+      - ./config/throw_torrent:/config
+      - ./data/downloads:/downloads
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ============================================================================
+  # KEEP Torrent - Permanent Seeding
+  # Maintains upload ratio and reputation with private trackers
+  # ===========================================================================
+  keeptorrent:
+    image: lscr.io/linuxserver/qbittorrent:latest
+    container_name: keep_torrent
+    network_mode: "service:vpn"
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-America/New_York}
+      - WEBUI_PORT=8085
+      - TORRENTING_PORT=6882
+    volumes:
+      - ./config/keep_torrent:/config
+      - ./data/seeding:/seeding
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ============================================================================
+  # Radarr - Movie Manager
+  # ===========================================================================
+  radarr:
+    image: lscr.io/linuxserver/radarr:latest
+    container_name: radarr
+    network_mode: "service:vpn"
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-America/New_York}
+    volumes:
+      - ./config/radarr:/config
+      - ./data/movies:/movies
+      - ./data/downloads:/downloads
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:7878/health || exit 1"]
+      interval: 60s
+      timeout: 10s
+      retries: 5
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ============================================================================
+  # Sonarr - TV Show Manager
+  # ===========================================================================
+  sonarr:
+    image: ghcr.io/hotio/sonarr:latest
+    container_name: sonarr
+    network_mode: "service:vpn"
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - UMASK=002
+      - TZ=${TZ:-America/New_York}
+    volumes:
+      - ./config/sonarr:/config
+      - ./data/tv:/tv
+      - ./data/downloads:/downloads
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8989/health || exit 1"]
+      interval: 60s
+      timeout: 10s
+      retries: 5
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ============================================================================
+  # Lidarr - Music Manager
+  # ===========================================================================
+  lidarr:
+    image: lscr.io/linuxserver/lidarr:latest
+    container_name: lidarr
+    network_mode: "service:vpn"
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-America/New_York}
+    volumes:
+      - ./config/lidarr:/config
+      - ./data/music:/music
+      - ./data/downloads:/downloads
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8688/health || exit 1"]
+      interval: 60s
+      timeout: 10s
+      retries: 5
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ============================================================================
+  # Bazarr - Subtitle Manager
+  # ===========================================================================
+  bazarr:
+    image: lscr.io/linuxserver/bazarr:latest
+    container_name: bazarr
+    network_mode: "service:vpn"
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-America/New_York}
+    volumes:
+      - ./config/bazarr:/config
+      - ./data/movies:/movies
+      - ./data/tv:/tv
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:6767/status || exit 1"]
+      interval: 60s
+      timeout: 10s
+      retries: 5
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ============================================================================
+  # Jackett - Indexer Search Bridge
+  # ===========================================================================
+  jackett:
+    image: lscr.io/linuxserver/jackett:latest
+    container_name: jackett
+    network_mode: "service:vpn"
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-America/New_York}
+      - AUTO_UPDATE=true
+    volumes:
+      - ./config/jackett:/config
+      - ./data/torrent:/torrents
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9117/dash || exit 1"]
+      interval: 60s
+      timeout: 10s
+      retries: 5
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ============================================================================
+  # Overseerr - Content Request Manager
+  # ===========================================================================
+  overseerr:
+    image: sctx/overseerr:latest
+    container_name: overseerr
+    network_mode: "service:vpn"
+    environment:
+      - LOG_LEVEL=info
+      - TZ=${TZ:-America/New_York}
+    volumes:
+      - ./config/overseerr:/app/config
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:5055/api/v1/settings/general || exit 1"]
+      interval: 60s
+      timeout: 10s
+      retries: 5
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ============================================================================
+  # Tautulli - Monitoring & Analytics (Plex Stats)
+  # ===========================================================================
+  tautulli:
+    image: ghcr.io/tautulli/tautulli:latest
+    container_name: tautulli
+    network_mode: "service:vpn"
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-America/New_York}
+    volumes:
+      - ./config/tautulli:/config
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8181 || exit 1"]
+      interval: 60s
+      timeout: 10s
+      retries: 5
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ============================================================================
+  # FlareSolverr - Anti-Bot Solver for Trackers
+  # ===========================================================================
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    container_name: flaresolverr
+    network_mode: "service:vpn"
+    environment:
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - LOG_HTML=${LOG_HTML:-false}
+      - CAPTCHA_SOLVER=${CAPTCHA_SOLVER:-none}
+      - TZ=${TZ:-America/New_York}
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ============================================================================
+  # Soularr - Sonarr/Lidarr Automation Bridge
+  # ===========================================================================
+  soularr:
+    image: mrusse08/soularr:latest
+    container_name: soularr
+    network_mode: "service:vpn"
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-America/New_York}
+    volumes:
+      - ./config/soularr:/config
+    command: /app/run.sh --config-dir /config
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ============================================================================
+  # slskd - Soulseek Network Client (P2P Music Sharing)
+  # ===========================================================================
+  slskd:
+    image: slskd/slskd:latest
+    container_name: slskd
+    network_mode: "service:vpn"
+    user: "${PUID:-1000}:${PGID:-1000}"
+    tmpfs:
+      - /tmp:size=256m,mode=1777
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-America/New_York}
+      - SLSKD_REMOTE_CONFIGURATION=true
+    volumes:
+      - ./config/slskd:/app/data
+      - ./data/music:/data/NAS
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+# ============================================================================
+# Port Mapping Reference (for docker-compose.override.yml)
+# ============================================================================
+# If running locally, add ports to services via override file:
+# ports:
+#   - "7878:7878"  # Radarr
+#   - "8989:8989"  # Sonarr
+#   - "8686:8686"  # Lidarr
+#   - "6767:6767"  # Bazarr
+#   - "9117:9117"  # Jackett
+#   - "5055:5055"  # Overseerr
+#   - "8181:8181"  # Tautulli
+#   - "8090:8090"  # Throw Torrent
+#   - "8085:8085"  # Keep Torrent
+#   - "5030:5030"  # slskd Web UI
+# ============================================================================

@@ -1,0 +1,128 @@
+name: Deploy ARR Stack
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Validate Configuration
+        run: |
+          echo "Validating deployment configuration..."
+          if [ ! -f docker-compose.yml ]; then
+            echo "❌ Error: docker-compose.yml not found!"
+            exit 1
+          fi
+          if grep -q "your_nordvpn_token_here" .env.example 2>/dev/null; then
+            echo "⚠️  Warning: .env.example contains default token placeholder"
+          fi
+
+      - name: Copy Configuration Files to Server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.TARGET_HOST }}
+          username: ${{ secrets.TARGET_USERNAME }}
+          key: ${{ secrets.TARGET_SSH_KEY }}
+          source: "docker-compose.yml, .env.example, docker-compose.override.yml"
+          target: "~/docker/media-download/"
+
+      - name: Generate Environment File from Secrets
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+
+            const envContent = `VPN_TOKEN=${process.env.VPN_TOKEN}
+PUID=${process.env.PUID || '1000'}
+PGID=${process.env.PGID || '1000'}
+TZ=${process.env.TZ || 'America/New_York'}
+LOG_LEVEL=${process.env.LOG_LEVEL || 'info'}
+LOG_HTML=${process.env.LOG_HTML || 'false'}
+CAPTCHA_SOLVER=${process.env.CAPTCHA_SOLVER || 'none'}`;
+
+            fs.writeFileSync('.env', envContent);
+
+      - name: Deploy Environment File to Server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.TARGET_HOST }}
+          username: ${{ secrets.TARGET_USERNAME }}
+          key: ${{ secrets.TARGET_SSH_KEY }}
+          source: ".env"
+          target: "~/docker/media-download/"
+
+      - name: SSH and Deploy Stack
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          VPN_TOKEN: ${{ secrets.VPN_TOKEN }}
+        with:
+          host: ${{ secrets.TARGET_HOST }}
+          username: ${{ secrets.TARGET_USERNAME }}
+          key: ${{ secrets.TARGET_SSH_KEY }}
+          script: |
+            cd ~/docker/media-download/
+
+            echo "📦 Pulling latest Docker images..."
+            docker compose pull || echo "⚠️  Warning: Could not pull all images"
+
+            echo "🔄 Restarting stack with force recreate..."
+            docker compose up -d --force-recreate
+
+            echo "⏳ Waiting for services to initialize..."
+            sleep 45
+
+            echo "🔍 Checking service health..."
+            RUNNING_COUNT=$(docker ps --filter "status=running" --format "{{.Names}}" | wc -l)
+            EXPECTED_SERVICES="nord_vpn,throw_torrent,radarr,sonarr,lidarr,bazarr,jackett,overseerr,tautulli,flaresolverr,soularr,slskd,keep_torrent"
+
+            echo "Services Status:"
+            docker compose ps
+
+            echo "✅ Deployment completed!"
+            echo ""
+            echo "🌐 Access Points (after SSH tunnel or direct server access):"
+            echo "   Radarr:    http://<server-ip>:7878"
+            echo "   Sonarr:    http://<server-ip>:8989"
+            echo "   Jackett:   http://<server-ip>:9117"
+            echo "   Tautulli:  http://<server-ip>:8181"
+            echo "   Overseerr: http://<server-ip>:5055"
+            echo "   Throw Torrent: http://<server-ip>:8090"
+            echo "   Keep Torrent:  http://<server-ip>:8085"
+
+      - name: Health Check Verification
+        if: always()
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.TARGET_HOST }}
+          username: ${{ secrets.TARGET_USERNAME }}
+          key: ${{ secrets.TARGET_SSH_KEY }}
+          script: |
+            cd ~/docker/media-download/
+
+            echo "🏥 Running health checks..."
+            HEALTHY=0
+            UNHEALTHY=0
+
+            for service in nord_vpn throw_torrent radarr sonarr lidarr bazarr jackett overseerr tautulli flaresolverr soularr slskd keep_torrent; do
+              STATUS=$(docker inspect --format='{{.State.Health.Status}}' $service 2>/dev/null || echo "not_found")
+              if [ "$STATUS" = "healthy" ]; then
+                echo "✅ $service: healthy"
+                ((HEALTHY++))
+              else
+                echo "❌ $service: $STATUS"
+                ((UNHEALTHY++))
+              fi
+            done
+
+            echo ""
+            echo "📊 Health Summary: $HEALTHY healthy, $UNHEALTHY unhealthy"
+
+            if [ "$UNHEALTHY" -gt 5 ]; then
+              echo "⚠️  Warning: Multiple services are unhealthy. Check logs with: docker compose logs"
+            fi
